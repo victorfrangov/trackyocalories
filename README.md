@@ -1,0 +1,1 @@
+Hi, I made this iOS calorie tracker. Used to replace paid versions. It's free, a bit clunky (I made this in 3 hours) but it works. It needs a gemini api key for the vision ai thingy. It's kind of a copy of Fitia. It's not signed so bring your own cert if you want to use it.
