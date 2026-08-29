@@ -2,13 +2,17 @@
 //  track_yo_caloriesApp.swift
 //  track yo calories
 //
-//  Created by Victor Frangov on 2026-08-28.
-//
 
 import SwiftUI
+import WidgetKit
 
 @main
 struct track_yo_caloriesApp: App {
+    init() {
+        // Force iOS to register and update Lock Screen & Home Screen widgets
+        WidgetCenter.shared.reloadAllTimelines()
+    }
+    
     var body: some Scene {
         WindowGroup {
             ContentView()

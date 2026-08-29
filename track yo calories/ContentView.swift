@@ -2,20 +2,21 @@
 //  ContentView.swift
 //  track yo calories
 //
-//  Created by Victor Frangov on 2026-08-28.
-//
 
 import SwiftUI
 
 struct ContentView: View {
+    @StateObject private var dataStore = DataStore.shared
+    
     var body: some View {
-        VStack {
-            Image(systemName: "globe")
-                .imageScale(.large)
-                .foregroundStyle(.tint)
-            Text("Hello, world!")
+        Group {
+            if dataStore.userProfile.isOnboarded {
+                MainTabView(dataStore: dataStore)
+            } else {
+                OnboardingView(dataStore: dataStore)
+            }
         }
-        .padding()
+        .tint(.orange)
     }
 }
 
