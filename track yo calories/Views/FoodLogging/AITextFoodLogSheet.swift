@@ -10,6 +10,7 @@ struct AITextFoodLogSheet: View {
     var preselectedMeal: MealType = .breakfast
     var targetDate: Date = Date()
     var initialText: String = ""
+    var initialEstimate: AIFoodEstimate? = nil
     var onLogged: (() -> Void)? = nil
     
     @Environment(\.dismiss) private var dismiss
@@ -37,14 +38,42 @@ struct AITextFoodLogSheet: View {
     @State private var baseCarbsPerGram: Double = 0.1
     @State private var baseFatPerGram: Double = 0.05
     
-    init(dataStore: DataStore, preselectedMeal: MealType = .breakfast, targetDate: Date = Date(), initialText: String = "", onLogged: (() -> Void)? = nil) {
+    init(
+        dataStore: DataStore,
+        preselectedMeal: MealType = .breakfast,
+        targetDate: Date = Date(),
+        initialText: String = "",
+        initialEstimate: AIFoodEstimate? = nil,
+        onLogged: (() -> Void)? = nil
+    ) {
         self.dataStore = dataStore
         self.preselectedMeal = preselectedMeal
         self.targetDate = targetDate
         self.initialText = initialText
+        self.initialEstimate = initialEstimate
         self.onLogged = onLogged
+        
         self._selectedMeal = State(initialValue: preselectedMeal)
         self._mealDescription = State(initialValue: initialText)
+        
+        if let est = initialEstimate {
+            self._aiEstimate = State(initialValue: est)
+            self._editedFoodName = State(initialValue: est.foodName)
+            let grams = max(10.0, est.estimatedGrams)
+            self._portionGrams = State(initialValue: grams)
+            self._editedCalories = State(initialValue: est.calories)
+            self._editedProtein = State(initialValue: est.protein)
+            self._editedCarbs = State(initialValue: est.carbs)
+            self._editedFat = State(initialValue: est.fat)
+            
+            self._baseCalPerGram = State(initialValue: est.calories / grams)
+            self._baseProteinPerGram = State(initialValue: est.protein / grams)
+            self._baseCarbsPerGram = State(initialValue: est.carbs / grams)
+            self._baseFatPerGram = State(initialValue: est.fat / grams)
+            self._isAnalyzing = State(initialValue: false)
+        } else if !initialText.isEmpty {
+            self._isAnalyzing = State(initialValue: true)
+        }
     }
     
     var apiKey: String? {
@@ -102,7 +131,7 @@ struct AITextFoodLogSheet: View {
                 manualCalorieSheet
             }
             .onAppear {
-                if !initialText.isEmpty && aiEstimate == nil {
+                if initialEstimate == nil && !initialText.isEmpty && aiEstimate == nil {
                     estimateMeal()
                 }
             }
@@ -423,6 +452,7 @@ struct AITextFoodLogSheet: View {
                 Button(action: {
                     withAnimation {
                         aiEstimate = nil
+                        isAnalyzing = false
                     }
                 }) {
                     Text("Edit Description & Re-estimate")

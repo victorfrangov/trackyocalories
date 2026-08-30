@@ -52,6 +52,8 @@ struct FoodSearchView: View {
         .dinner: [""],
         .snacks: [""]
     ]
+    @State private var isEstimatingList: Bool = false
+    @State private var estimatedAIResult: AIFoodEstimate? = nil
     @State private var showAITextSheet: Bool = false
     @State private var listEstimatePrompt: String = ""
     
@@ -142,6 +144,7 @@ struct FoodSearchView: View {
                     preselectedMeal: activeMealInList,
                     targetDate: targetDate,
                     initialText: listEstimatePrompt,
+                    initialEstimate: estimatedAIResult,
                     onLogged: { dismiss() }
                 )
             }
@@ -629,18 +632,26 @@ struct FoodSearchView: View {
                     submitListToAI()
                 }) {
                     HStack(spacing: 8) {
-                        Image(systemName: "sparkles")
-                            .font(.system(size: 16, weight: .bold))
-                        Text("Estimate & Log with AI")
-                            .font(.system(size: 16, weight: .bold))
+                        if isEstimatingList {
+                            ProgressView()
+                                .tint(.white)
+                            Text("Estimating with AI...")
+                                .font(.system(size: 16, weight: .bold))
+                        } else {
+                            Image(systemName: "sparkles")
+                                .font(.system(size: 16, weight: .bold))
+                            Text("Estimate & Log with AI")
+                                .font(.system(size: 16, weight: .bold))
+                        }
                     }
                     .foregroundColor(.white)
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 16)
-                    .background(Color.orange)
+                    .background(isEstimatingList ? Color.orange.opacity(0.6) : Color.orange)
                     .cornerRadius(18)
                     .shadow(color: Color.orange.opacity(0.35), radius: 8, y: 4)
                 }
+                .disabled(isEstimatingList)
                 .padding(.horizontal, 16)
                 .padding(.top, 8)
                 .padding(.bottom, 110)
@@ -704,8 +715,30 @@ struct FoodSearchView: View {
         let prompt = items.joined(separator: ", ")
         guard !prompt.isEmpty else { return }
         
+        guard let key = dataStore.userProfile.geminiApiKey, !key.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            showApiKeySheet = true
+            return
+        }
+        
         listEstimatePrompt = prompt
-        showAITextSheet = true
+        isEstimatingList = true
+        estimatedAIResult = nil
+        
+        Task {
+            do {
+                let estimate = try await AIFoodScannerService.shared.analyzeFoodDescription(text: prompt, apiKey: key)
+                await MainActor.run {
+                    self.estimatedAIResult = estimate
+                    self.isEstimatingList = false
+                    self.showAITextSheet = true
+                }
+            } catch {
+                await MainActor.run {
+                    self.isEstimatingList = false
+                    self.showAITextSheet = true
+                }
+            }
+        }
     }
     
     // MARK: - Scan Mode View
