@@ -17,27 +17,17 @@ struct MainTabView: View {
                 }
                 .tag(0)
             
-            FoodSearchView(
-                dataStore: dataStore,
-                preselectedMeal: .breakfast,
-                targetDate: dataStore.selectedDate
-            )
-            .tabItem {
-                Label("Log Food", systemImage: "fork.knife")
-            }
-            .tag(1)
-            
             ProgressTrackerView(dataStore: dataStore)
                 .tabItem {
                     Label("Progress", systemImage: "chart.line.uptrend.xyaxis")
                 }
-                .tag(2)
+                .tag(1)
             
             ProfileView(dataStore: dataStore)
                 .tabItem {
                     Label("Profile", systemImage: "person.crop.circle.fill")
                 }
-                .tag(3)
+                .tag(2)
         }
     }
 }

@@ -11,7 +11,6 @@ enum FitiaLogMode: String, CaseIterable, Identifiable {
     case list = "List"
     case search = "Search"
     case scan = "Scan"
-    case voice = "Voice"
     
     var id: String { rawValue }
     
@@ -21,7 +20,6 @@ enum FitiaLogMode: String, CaseIterable, Identifiable {
         case .list: return "list.bullet"
         case .search: return "magnifyingglass"
         case .scan: return "camera"
-        case .voice: return "mic.fill"
         }
     }
 }
@@ -54,7 +52,6 @@ struct FoodSearchView: View {
         .dinner: [""],
         .snacks: [""]
     ]
-    @State private var isEstimatingList: Bool = false
     @State private var showAITextSheet: Bool = false
     @State private var listEstimatePrompt: String = ""
     
@@ -89,45 +86,6 @@ struct FoodSearchView: View {
         self._activeMealInList = State(initialValue: preselectedMeal)
     }
     
-    var displayedSearchResults: [FoodItem] {
-        let q = searchText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        
-        switch searchTab {
-        case .database:
-            if q.isEmpty {
-                return LocalFoodDatabaseService.shared.defaultStaples()
-            } else {
-                let dbResults = LocalFoodDatabaseService.shared.search(query: q)
-                var combined = dbResults
-                for online in onlineResults {
-                    if !combined.contains(where: { $0.id == online.id || ($0.barcode != nil && $0.barcode == online.barcode) || $0.name.lowercased() == online.name.lowercased() }) {
-                        combined.append(online)
-                    }
-                }
-                return combined
-            }
-            
-        case .favorites:
-            if q.isEmpty {
-                return dataStore.favoriteFoods
-            } else {
-                return dataStore.favoriteFoods.filter {
-                    $0.name.localizedCaseInsensitiveContains(q) || ($0.brand?.localizedCaseInsensitiveContains(q) ?? false)
-                }
-            }
-            
-        case .created:
-            let list = dataStore.customFoods
-            if q.isEmpty {
-                return list
-            } else {
-                return list.filter {
-                    $0.name.localizedCaseInsensitiveContains(q) || ($0.brand?.localizedCaseInsensitiveContains(q) ?? false)
-                }
-            }
-        }
-    }
-    
     var body: some View {
         NavigationStack {
             ZStack(alignment: .bottom) {
@@ -144,12 +102,10 @@ struct FoodSearchView: View {
                         scanModeView
                     case .recipes:
                         recipesModeView
-                    case .voice:
-                        voiceModeView
                     }
                 }
                 
-                // Bottom Fitia 5-Mode Floating Bar
+                // Bottom Fitia Liquid Glass Floating Mode Bar
                 bottomFloatingModeBar
             }
             .navigationBarTitleDisplayMode(.inline)
@@ -192,10 +148,10 @@ struct FoodSearchView: View {
         }
     }
     
-    // MARK: - Search Mode View (Fitia Format)
+    // MARK: - Search Mode View
     private var searchModeView: some View {
         VStack(spacing: 0) {
-            // Top Fitia Search Bar with Swiss Flag Badge and Menu
+            // Search Bar & Options Menu (Swiss Flag removed)
             HStack(spacing: 10) {
                 HStack(spacing: 8) {
                     Image(systemName: "magnifyingglass")
@@ -215,11 +171,6 @@ struct FoodSearchView: View {
                                 .font(.system(size: 14))
                         }
                     }
-                    
-                    // Swiss DB Badge Indicator
-                    Text("🇨🇭")
-                        .font(.system(size: 14))
-                        .padding(.horizontal, 4)
                 }
                 .padding(.horizontal, 12)
                 .padding(.vertical, 9)
@@ -283,21 +234,141 @@ struct FoodSearchView: View {
             Divider()
                 .padding(.top, 2)
             
-            // Search Results or Fitia Recents / Recent Meals
+            // Scroll Content based on active Tab
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
                     if !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                        // Filtered Search Results
+                        // Searching active
                         searchResultsSection
                     } else {
-                        // Fitia Default Screen: RECENTLY ENTERED + RECENT MEALS
-                        recentlyEnteredSection
-                        
-                        recentMealsSection
+                        // Switching tabs when searchText is empty
+                        switch searchTab {
+                        case .database:
+                            databaseTabContent
+                        case .favorites:
+                            favoritesTabContent
+                        case .created:
+                            createdTabContent
+                        }
                     }
                 }
                 .padding(.top, 12)
                 .padding(.bottom, 100) // Padding for bottom floating bar
+            }
+        }
+    }
+    
+    // MARK: - Tab Contents
+    private var databaseTabContent: some View {
+        VStack(alignment: .leading, spacing: 20) {
+            recentlyEnteredSection
+            recentMealsSection
+        }
+    }
+    
+    private var favoritesTabContent: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("FAVORITES")
+                .font(.system(size: 12, weight: .bold))
+                .foregroundColor(.secondary)
+                .padding(.horizontal, 20)
+            
+            if dataStore.favoriteFoods.isEmpty {
+                VStack(spacing: 8) {
+                    Image(systemName: "heart")
+                        .font(.system(size: 36))
+                        .foregroundColor(.secondary)
+                    Text("No Favorites Yet")
+                        .font(.system(size: 16, weight: .semibold))
+                    Text("Tap the star icon on any food item to add it to your favorites for quick logging.")
+                        .font(.system(size: 13))
+                        .foregroundColor(.secondary)
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, 24)
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 32)
+                .background(Color(.secondarySystemGroupedBackground))
+                .cornerRadius(16)
+                .padding(.horizontal, 16)
+            } else {
+                VStack(spacing: 0) {
+                    ForEach(dataStore.favoriteFoods) { item in
+                        Button(action: { selectedFoodForDetail = item }) {
+                            fitiaFoodRow(item: item)
+                        }
+                        .buttonStyle(.plain)
+                        
+                        Divider().padding(.leading, 56)
+                    }
+                }
+                .background(Color(.secondarySystemGroupedBackground))
+                .cornerRadius(16)
+                .padding(.horizontal, 16)
+            }
+        }
+    }
+    
+    private var createdTabContent: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack {
+                Text("CUSTOM FOODS & RECIPES")
+                    .font(.system(size: 12, weight: .bold))
+                    .foregroundColor(.secondary)
+                Spacer()
+                Button(action: { showCreateFood = true }) {
+                    Label("Create", systemImage: "plus")
+                        .font(.system(size: 13, weight: .bold))
+                        .foregroundColor(.orange)
+                }
+            }
+            .padding(.horizontal, 20)
+            
+            let customList = dataStore.customFoods + dataStore.recipes.map { $0.toFoodItem() }
+            
+            if customList.isEmpty {
+                VStack(spacing: 8) {
+                    Image(systemName: "pencil.and.list.clipboard")
+                        .font(.system(size: 36))
+                        .foregroundColor(.secondary)
+                    Text("No Created Foods Yet")
+                        .font(.system(size: 16, weight: .semibold))
+                    Text("Create your own custom food items with nutritional labels or recipes.")
+                        .font(.system(size: 13))
+                        .foregroundColor(.secondary)
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, 24)
+                    
+                    Button(action: { showCreateFood = true }) {
+                        Text("+ Create Food or Recipe")
+                            .font(.system(size: 14, weight: .bold))
+                            .foregroundColor(.white)
+                            .padding(.horizontal, 18)
+                            .padding(.vertical, 9)
+                            .background(Color.orange)
+                            .cornerRadius(12)
+                    }
+                    .padding(.top, 6)
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 28)
+                .background(Color(.secondarySystemGroupedBackground))
+                .cornerRadius(16)
+                .padding(.horizontal, 16)
+            } else {
+                VStack(spacing: 0) {
+                    ForEach(customList) { item in
+                        Button(action: { selectedFoodForDetail = item }) {
+                            fitiaFoodRow(item: item)
+                        }
+                        .buttonStyle(.plain)
+                        
+                        Divider().padding(.leading, 56)
+                    }
+                }
+                .background(Color(.secondarySystemGroupedBackground))
+                .cornerRadius(16)
+                .padding(.horizontal, 16)
             }
         }
     }
@@ -315,12 +386,14 @@ struct FoodSearchView: View {
                 .padding(.vertical, 8)
             }
             
-            if displayedSearchResults.isEmpty && !isSearchingOnline {
+            let results = getFilteredSearchResults()
+            
+            if results.isEmpty && !isSearchingOnline {
                 VStack(spacing: 8) {
                     Image(systemName: "magnifyingglass")
                         .font(.system(size: 32))
                         .foregroundColor(.secondary)
-                    Text("No foods found")
+                    Text("No foods found in \(searchTab.rawValue)")
                         .font(.system(size: 15, weight: .medium))
                         .foregroundColor(.secondary)
                 }
@@ -328,7 +401,7 @@ struct FoodSearchView: View {
                 .padding(.vertical, 32)
             } else {
                 LazyVStack(spacing: 0) {
-                    ForEach(displayedSearchResults) { item in
+                    ForEach(results) { item in
                         Button(action: {
                             selectedFoodForDetail = item
                         }) {
@@ -343,6 +416,34 @@ struct FoodSearchView: View {
                 .background(Color(.secondarySystemGroupedBackground))
                 .cornerRadius(16)
                 .padding(.horizontal, 16)
+            }
+        }
+    }
+    
+    private func getFilteredSearchResults() -> [FoodItem] {
+        let q = searchText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !q.isEmpty else { return [] }
+        
+        switch searchTab {
+        case .database:
+            let dbResults = LocalFoodDatabaseService.shared.search(query: q)
+            var combined = dbResults
+            for online in onlineResults {
+                if !combined.contains(where: { $0.id == online.id || ($0.barcode != nil && $0.barcode == online.barcode) || $0.name.lowercased() == online.name.lowercased() }) {
+                    combined.append(online)
+                }
+            }
+            return combined
+            
+        case .favorites:
+            return dataStore.favoriteFoods.filter {
+                $0.name.localizedCaseInsensitiveContains(q) || ($0.brand?.localizedCaseInsensitiveContains(q) ?? false)
+            }
+            
+        case .created:
+            let customList = dataStore.customFoods + dataStore.recipes.map { $0.toFoodItem() }
+            return customList.filter {
+                $0.name.localizedCaseInsensitiveContains(q) || ($0.brand?.localizedCaseInsensitiveContains(q) ?? false)
             }
         }
     }
@@ -420,7 +521,6 @@ struct FoodSearchView: View {
                 VStack(spacing: 0) {
                     ForEach(recentMealGroups, id: \.id) { group in
                         Button(action: {
-                            // Quick log all foods in this past meal
                             logRecentMealGroup(group)
                         }) {
                             HStack(spacing: 12) {
@@ -523,7 +623,7 @@ struct FoodSearchView: View {
                     mealListCard(meal: meal)
                 }
                 
-                // Floating Action Checkmark Button
+                // Action Button
                 Button(action: {
                     UIImpactFeedbackGenerator(style: .medium).impactOccurred()
                     submitListToAI()
@@ -608,7 +708,7 @@ struct FoodSearchView: View {
         showAITextSheet = true
     }
     
-    // MARK: - Scan Mode View (Screenshot 3)
+    // MARK: - Scan Mode View
     private var scanModeView: some View {
         ZStack {
             if scanMode == .photo {
@@ -661,8 +761,8 @@ struct FoodSearchView: View {
                     }
                 }
                 .padding(4)
-                .background(Color.black.opacity(0.65))
-                .cornerRadius(24)
+                .background(.ultraThinMaterial)
+                .clipShape(Capsule())
                 .padding(.bottom, 110)
             }
         }
@@ -711,83 +811,64 @@ struct FoodSearchView: View {
         }
     }
     
-    // MARK: - Voice / Quick Mode View
-    private var voiceModeView: some View {
-        VStack(spacing: 24) {
-            Spacer()
-            
-            Button(action: {
-                showAITextSheet = true
-            }) {
-                ZStack {
-                    Circle()
-                        .fill(Color.orange.opacity(0.15))
-                        .frame(width: 120, height: 120)
-                    
-                    Circle()
-                        .fill(Color.orange)
-                        .frame(width: 80, height: 80)
-                    
-                    Image(systemName: "mic.fill")
-                        .font(.system(size: 36))
-                        .foregroundColor(.white)
-                }
-            }
-            
-            VStack(spacing: 6) {
-                Text("Tap to Describe Meal")
-                    .font(.system(size: 18, weight: .bold, design: .rounded))
-                Text("Speak or type what you ate to calculate calories")
-                    .font(.system(size: 14))
-                    .foregroundColor(.secondary)
-            }
-            
-            Spacer()
-        }
-        .padding(.bottom, 100)
-    }
-    
-    // MARK: - Fitia 5-Mode Floating Bottom Bar
+    // MARK: - Fitia Liquid Glass Floating Mode Bar (4 Modes: Recipes, List, Search, Scan)
     private var bottomFloatingModeBar: some View {
-        HStack(spacing: 0) {
+        HStack(spacing: 8) {
             ForEach(FitiaLogMode.allCases) { mode in
                 Button(action: {
                     UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                    withAnimation(.spring(response: 0.3, dampingFraction: 0.75)) {
+                    withAnimation(.spring(response: 0.35, dampingFraction: 0.75)) {
                         activeMode = mode
                     }
                 }) {
-                    VStack(spacing: 4) {
-                        if activeMode == mode {
-                            ZStack {
-                                Circle()
-                                    .fill(Color.orange)
-                                    .frame(width: 44, height: 44)
-                                Image(systemName: mode.iconName)
-                                    .font(.system(size: 18, weight: .bold))
-                                    .foregroundColor(.white)
-                            }
-                            .offset(y: -4)
-                        } else {
-                            Image(systemName: mode.iconName)
-                                .font(.system(size: 20))
-                                .foregroundColor(.secondary)
-                                .frame(height: 36)
-                        }
+                    HStack(spacing: 6) {
+                        Image(systemName: mode.iconName)
+                            .font(.system(size: activeMode == mode ? 16 : 17, weight: activeMode == mode ? .bold : .medium))
                         
-                        Text(mode.rawValue)
-                            .font(.system(size: 10, weight: activeMode == mode ? .bold : .medium))
-                            .foregroundColor(activeMode == mode ? .orange : .secondary)
+                        if activeMode == mode {
+                            Text(mode.rawValue)
+                                .font(.system(size: 13, weight: .bold, design: .rounded))
+                        }
                     }
-                    .frame(maxWidth: .infinity)
+                    .foregroundColor(activeMode == mode ? .white : .secondary)
+                    .padding(.horizontal, activeMode == mode ? 16 : 14)
+                    .padding(.vertical, 10)
+                    .background(
+                        ZStack {
+                            if activeMode == mode {
+                                Capsule()
+                                    .fill(
+                                        LinearGradient(
+                                            colors: [Color.orange, Color.orange.opacity(0.85)],
+                                            startPoint: .topLeading,
+                                            endPoint: .bottomTrailing
+                                        )
+                                    )
+                                    .shadow(color: Color.orange.opacity(0.4), radius: 8, y: 3)
+                            }
+                        }
+                    )
                 }
             }
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
+        .padding(6)
         .background(.ultraThinMaterial)
-        .cornerRadius(28)
-        .shadow(color: Color.black.opacity(0.12), radius: 12, y: 4)
+        .clipShape(Capsule())
+        .overlay(
+            Capsule()
+                .stroke(
+                    LinearGradient(
+                        colors: [
+                            Color.white.opacity(0.4),
+                            Color.white.opacity(0.12)
+                        ],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    ),
+                    lineWidth: 1
+                )
+        )
+        .shadow(color: Color.black.opacity(0.18), radius: 16, y: 8)
         .padding(.horizontal, 20)
         .padding(.bottom, 16)
     }
@@ -838,7 +919,6 @@ struct FoodSearchView: View {
     private func buildRecentMealGroups() -> [RecentMealGroup] {
         let entries = dataStore.loggedEntries
         guard !entries.isEmpty else {
-            // Default sample recent meals matching Fitia
             return [
                 RecentMealGroup(
                     title: "Breakfast (Yesterday)",
