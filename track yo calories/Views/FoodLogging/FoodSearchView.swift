@@ -19,6 +19,7 @@ struct FoodSearchView: View {
     @State private var searchTask: Task<Void, Never>? = nil
     
     @State private var selectedFoodForDetail: FoodItem? = nil
+    @State private var showAITextLog: Bool = false
     @State private var showScanner: Bool = false
     @State private var showAIScanner: Bool = false
     @State private var showQuickAdd: Bool = false
@@ -102,16 +103,33 @@ struct FoodSearchView: View {
             VStack(spacing: 0) {
                 // Quick Action Bar
                 HStack(spacing: 8) {
-                    Button(action: { showAIScanner = true }) {
+                    Button(action: {
+                        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                        showAITextLog = true
+                    }) {
                         HStack(spacing: 4) {
                             Image(systemName: "sparkles")
                                 .font(.system(size: 13, weight: .bold))
-                            Text("AI Photo")
+                            Text("Describe")
                                 .font(.system(size: 13, weight: .semibold))
                         }
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 8)
-                        .background(Color.orange.opacity(0.15))
+                        .background(Color.orange.opacity(0.18))
+                        .foregroundColor(.orange)
+                        .cornerRadius(10)
+                    }
+                    
+                    Button(action: { showAIScanner = true }) {
+                        HStack(spacing: 4) {
+                            Image(systemName: "camera.fill")
+                                .font(.system(size: 12))
+                            Text("Photo")
+                                .font(.system(size: 13, weight: .semibold))
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 8)
+                        .background(Color.orange.opacity(0.12))
                         .foregroundColor(.orange)
                         .cornerRadius(10)
                     }
@@ -139,7 +157,7 @@ struct FoodSearchView: View {
                         }
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 8)
-                        .background(Color(.systemGray5))
+                        .background(Color(.tertiarySystemGroupedBackground))
                         .foregroundColor(.primary)
                         .cornerRadius(10)
                     }
@@ -153,7 +171,7 @@ struct FoodSearchView: View {
                         }
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 8)
-                        .background(Color(.systemGray5))
+                        .background(Color(.tertiarySystemGroupedBackground))
                         .foregroundColor(.primary)
                         .cornerRadius(10)
                     }
@@ -173,6 +191,42 @@ struct FoodSearchView: View {
                 
                 // Food Results List
                 List {
+                    // AI Describe Quick Action Banner
+                    Button(action: {
+                        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                        showAITextLog = true
+                    }) {
+                        HStack(spacing: 12) {
+                            ZStack {
+                                Circle()
+                                    .fill(Color.orange.opacity(0.2))
+                                    .frame(width: 36, height: 36)
+                                Image(systemName: "sparkles")
+                                    .font(.system(size: 16, weight: .bold))
+                                    .foregroundColor(.orange)
+                            }
+                            
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(searchText.isEmpty ? "Describe What You Ate to AI" : "Estimate \"\(searchText)\" with AI")
+                                    .font(.system(size: 15, weight: .bold))
+                                    .foregroundColor(.primary)
+                                    .lineLimit(1)
+                                
+                                Text(searchText.isEmpty ? "Type sentences like '2 eggs, toast, and a latte'" : "Instant calories & macros calculation")
+                                    .font(.system(size: 12))
+                                    .foregroundColor(.secondary)
+                            }
+                            
+                            Spacer()
+                            
+                            Image(systemName: "chevron.right")
+                                .font(.system(size: 13, weight: .bold))
+                                .foregroundColor(.secondary)
+                        }
+                        .padding(.vertical, 6)
+                    }
+                    .listRowBackground(Color.orange.opacity(0.08))
+                    
                     if isSearchingOnline {
                         HStack {
                             Spacer()
@@ -191,13 +245,14 @@ struct FoodSearchView: View {
                             Text("No items found")
                                 .font(.system(size: 16, weight: .medium))
                                 .foregroundColor(.secondary)
-                            Text("Try searching another name or create a custom food")
+                            Text("Tap 'Describe What You Ate to AI' above to calculate calories automatically!")
                                 .font(.system(size: 13))
                                 .foregroundColor(.secondary)
                                 .multilineTextAlignment(.center)
+                                .padding(.horizontal, 24)
                         }
                         .frame(maxWidth: .infinity)
-                        .padding(.vertical, 40)
+                        .padding(.vertical, 32)
                         .listRowBackground(Color.clear)
                     } else {
                         ForEach(displayedItems) { item in
@@ -212,7 +267,7 @@ struct FoodSearchView: View {
                 }
                 .listStyle(.plain)
             }
-            .searchable(text: $searchText, prompt: "Search foods, brands, or barcode...")
+            .searchable(text: $searchText, prompt: "Search foods, or type what you ate...")
             .onChange(of: searchText) { _, newValue in
                 performSearch(query: newValue)
             }
@@ -222,6 +277,17 @@ struct FoodSearchView: View {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { dismiss() }
                 }
+            }
+            .sheet(isPresented: $showAITextLog) {
+                AITextFoodLogSheet(
+                    dataStore: dataStore,
+                    preselectedMeal: preselectedMeal,
+                    targetDate: targetDate,
+                    initialText: searchText,
+                    onLogged: {
+                        dismiss()
+                    }
+                )
             }
             .sheet(item: $selectedFoodForDetail) { food in
                 FoodDetailView(

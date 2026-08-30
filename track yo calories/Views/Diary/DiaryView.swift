@@ -9,6 +9,7 @@ struct DiaryView: View {
     @ObservedObject var dataStore: DataStore
     
     @State private var showSearchSheet: Bool = false
+    @State private var showAITextSheet: Bool = false
     @State private var showScannerSheet: Bool = false
     @State private var showAIScannerSheet: Bool = false
     @State private var showQuickAddSheet: Bool = false
@@ -109,19 +110,28 @@ struct DiaryView: View {
                     HStack(spacing: 12) {
                         Button(action: {
                             selectedMealForAdd = .lunch
-                            showAIScannerSheet = true
+                            showAITextSheet = true
                         }) {
                             HStack(spacing: 4) {
                                 Image(systemName: "sparkles")
                                     .font(.system(size: 13, weight: .bold))
-                                Image(systemName: "camera.fill")
-                                    .font(.system(size: 13))
+                                Text("AI Log")
+                                    .font(.system(size: 12, weight: .bold))
                             }
                             .foregroundColor(.orange)
                             .padding(.horizontal, 8)
                             .padding(.vertical, 5)
                             .background(Color.orange.opacity(0.15))
                             .cornerRadius(12)
+                        }
+                        
+                        Button(action: {
+                            selectedMealForAdd = .lunch
+                            showAIScannerSheet = true
+                        }) {
+                            Image(systemName: "camera.fill")
+                                .font(.system(size: 14))
+                                .foregroundColor(.orange)
                         }
                         
                         Button(action: {
@@ -134,6 +144,13 @@ struct DiaryView: View {
                         }
                     }
                 }
+            }
+            .sheet(isPresented: $showAITextSheet) {
+                AITextFoodLogSheet(
+                    dataStore: dataStore,
+                    preselectedMeal: selectedMealForAdd,
+                    targetDate: dataStore.selectedDate
+                )
             }
             .sheet(isPresented: $showSearchSheet) {
                 FoodSearchView(

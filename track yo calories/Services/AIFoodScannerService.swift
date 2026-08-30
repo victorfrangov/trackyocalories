@@ -69,11 +69,11 @@ enum AIScannerError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .missingApiKey:
-            return "Please enter your free Google AI Studio Gemini API key in Settings."
+            return "Please enter your free Google AI Studio Gemini API key in Profile settings."
         case .imageCompressionFailed:
             return "Failed to process image format."
         case .invalidResponse:
-            return "Could not identify food items or parse nutritional values. Please try taking a clearer photo."
+            return "Could not identify food items or parse nutritional values. Please try phrasing your meal description differently or taking a clearer photo."
         case .apiError(let msg):
             return msg
         }
@@ -94,6 +94,92 @@ actor AIFoodScannerService {
         return URLSession(configuration: config)
     }()
     
+    // MARK: - Natural Language Text Description Analysis
+    func analyzeFoodDescription(text: String, apiKey: String) async throws -> AIFoodEstimate {
+        let cleanKey = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleanKey.isEmpty else {
+            throw AIScannerError.missingApiKey
+        }
+        
+        let candidateModels = [
+            preferredModel,
+            "gemini-3.6-flash",
+            "gemini-2.5-flash",
+            "gemini-1.5-flash-latest"
+        ]
+        
+        var lastError: Error = AIScannerError.invalidResponse
+        
+        for model in candidateModels {
+            do {
+                let result = try await executeGeminiTextRequest(model: model, description: text, apiKey: cleanKey)
+                self.preferredModel = model
+                return result
+            } catch {
+                lastError = error
+                if let apiErr = error as? AIScannerError, case .apiError(let msg) = apiErr {
+                    if msg.contains("API key is invalid") || msg.contains("Rate limit") {
+                        throw error
+                    }
+                }
+                continue
+            }
+        }
+        
+        throw lastError
+    }
+    
+    private func executeGeminiTextRequest(model: String, description: String, apiKey: String) async throws -> AIFoodEstimate {
+        let cleanModel = model.hasPrefix("models/") ? String(model.dropFirst(7)) : model
+        
+        guard let url = URL(string: "https://generativelanguage.googleapis.com/v1beta/models/\(cleanModel):generateContent?key=\(apiKey)") else {
+            throw AIScannerError.apiError("Invalid API endpoint URL")
+        }
+        
+        let promptText = """
+        You are an expert clinical dietitian, nutritionist, and calorie tracker.
+        The user describes what they ate: "\(description)".
+        Accurately determine all ingredients/items mentioned, realistic standard portion sizes, total weight in grams, total calories (kcal), and macronutrients (protein, carbs, fat, fiber, sugar, sodium).
+        Return ONLY valid JSON matching this schema:
+        {
+          "foodName": "Concise descriptive meal name",
+          "calories": 450,
+          "protein": 35,
+          "carbs": 40,
+          "fat": 12,
+          "fiber": 5,
+          "sugar": 4,
+          "sodium": 500,
+          "servingDescription": "Total portion (e.g. 1 bowl (350g) or 2 eggs + 1 toast)",
+          "estimatedGrams": 350,
+          "ingredientsDetected": ["2 scrambled eggs", "1 slice sourdough", "10g butter"],
+          "confidence": "High"
+        }
+        """
+        
+        let requestPayload: [String: Any] = [
+            "contents": [
+                [
+                    "parts": [
+                        ["text": promptText]
+                    ]
+                ]
+            ],
+            "generationConfig": [
+                "responseMimeType": "application/json"
+            ]
+        ]
+        
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONSerialization.data(withJSONObject: requestPayload)
+        
+        let (data, response) = try await session.data(for: request)
+        return try parseGeminiResponse(data: data, response: response, cleanModel: cleanModel)
+    }
+    
+    // MARK: - Photo Analysis
     func analyzeFood(image: UIImage, apiKey: String) async throws -> AIFoodEstimate {
         let cleanKey = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !cleanKey.isEmpty else {
@@ -187,6 +273,10 @@ actor AIFoodScannerService {
         request.httpBody = try JSONSerialization.data(withJSONObject: requestPayload)
         
         let (data, response) = try await session.data(for: request)
+        return try parseGeminiResponse(data: data, response: response, cleanModel: cleanModel)
+    }
+    
+    private func parseGeminiResponse(data: Data, response: URLResponse, cleanModel: String) throws -> AIFoodEstimate {
         guard let httpResponse = response as? HTTPURLResponse else {
             throw AIScannerError.invalidResponse
         }
