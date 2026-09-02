@@ -7,88 +7,84 @@ import Foundation
 import SwiftUI
 import UIKit
 
-struct AIFoodEstimate: Identifiable, Codable, Sendable {
+struct AIFoodItemEstimate: Identifiable, Codable, Sendable {
     var id: UUID = UUID()
-    var foodName: String
+    var name: String
     var calories: Double
     var protein: Double
     var carbs: Double
     var fat: Double
-    var fiber: Double?
-    var sugar: Double?
-    var sodium: Double?
-    var servingDescription: String
-    var estimatedGrams: Double
-    var ingredientsDetected: [String]
-    var confidence: String
+    var portionDescription: String
+    var gramWeight: Double
+    
+    // Baseline densities for portion scaling
+    var baseCalPerGram: Double {
+        let g = max(1.0, gramWeight)
+        return calories / g
+    }
+    var baseProteinPerGram: Double {
+        let g = max(1.0, gramWeight)
+        return protein / g
+    }
+    var baseCarbsPerGram: Double {
+        let g = max(1.0, gramWeight)
+        return carbs / g
+    }
+    var baseFatPerGram: Double {
+        let g = max(1.0, gramWeight)
+        return fat / g
+    }
     
     enum CodingKeys: String, CodingKey {
-        case foodName, calories, protein, carbs, fat, fiber, sugar, sodium, servingDescription, estimatedGrams, ingredientsDetected, confidence
+        case name, calories, protein, carbs, fat, portionDescription, gramWeight
     }
     
     init(
-        foodName: String,
+        id: UUID = UUID(),
+        name: String,
         calories: Double,
         protein: Double,
         carbs: Double,
         fat: Double,
-        fiber: Double? = nil,
-        sugar: Double? = nil,
-        sodium: Double? = nil,
-        servingDescription: String = "1 serving",
-        estimatedGrams: Double = 100.0,
-        ingredientsDetected: [String] = [],
-        confidence: String = "High"
+        portionDescription: String = "1 serving",
+        gramWeight: Double = 100.0
     ) {
-        self.id = UUID()
-        self.foodName = foodName
+        self.id = id
+        self.name = name
         self.calories = calories
         self.protein = protein
         self.carbs = carbs
         self.fat = fat
-        self.fiber = fiber
-        self.sugar = sugar
-        self.sodium = sodium
-        self.servingDescription = servingDescription
-        self.estimatedGrams = estimatedGrams
-        self.ingredientsDetected = ingredientsDetected
-        self.confidence = confidence
+        self.portionDescription = portionDescription
+        self.gramWeight = gramWeight
     }
     
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         self.id = UUID()
-        self.foodName = try container.decode(String.self, forKey: .foodName)
+        self.name = try container.decode(String.self, forKey: .name)
         self.calories = try container.decode(Double.self, forKey: .calories)
         self.protein = try container.decode(Double.self, forKey: .protein)
         self.carbs = try container.decode(Double.self, forKey: .carbs)
         self.fat = try container.decode(Double.self, forKey: .fat)
-        self.fiber = try container.decodeIfPresent(Double.self, forKey: .fiber)
-        self.sugar = try container.decodeIfPresent(Double.self, forKey: .sugar)
-        self.sodium = try container.decodeIfPresent(Double.self, forKey: .sodium)
-        self.servingDescription = try container.decodeIfPresent(String.self, forKey: .servingDescription) ?? "1 serving"
-        self.estimatedGrams = try container.decodeIfPresent(Double.self, forKey: .estimatedGrams) ?? 100.0
-        self.ingredientsDetected = try container.decodeIfPresent([String].self, forKey: .ingredientsDetected) ?? []
-        self.confidence = try container.decodeIfPresent(String.self, forKey: .confidence) ?? "Medium"
+        self.portionDescription = try container.decodeIfPresent(String.self, forKey: .portionDescription) ?? "1 serving"
+        self.gramWeight = try container.decodeIfPresent(Double.self, forKey: .gramWeight) ?? 100.0
     }
     
     func toFoodItem() -> FoodItem {
-        let grams = max(10.0, estimatedGrams)
+        let grams = max(1.0, gramWeight)
         let factor = 100.0 / grams
         
         let nutrients100g = NutrientInfo(
             calories: calories * factor,
             protein: protein * factor,
             carbs: carbs * factor,
-            fat: fat * factor,
-            fiber: fiber.map { $0 * factor },
-            sugar: sugar.map { $0 * factor },
-            sodium: sodium.map { $0 * factor }
+            fat: fat * factor
         )
         
-        let defaultServing = ServingOption(
+        let serving = ServingOption(
             id: UUID(),
-            name: servingDescription.isEmpty ? "1 serving (\(Int(grams))g)" : servingDescription,
+            name: portionDescription.isEmpty ? "1 portion (\(Int(grams))g)" : portionDescription,
             gramWeight: grams,
             isDefault: true
         )
@@ -96,7 +92,141 @@ struct AIFoodEstimate: Identifiable, Codable, Sendable {
         return FoodItem(
             id: UUID(),
             barcode: nil,
-            name: foodName,
+            name: name,
+            brand: "AI Estimated",
+            category: "AI Meal Log",
+            nutrientsPer100g: nutrients100g,
+            servingOptions: [
+                serving,
+                ServingOption.grams(100.0),
+                ServingOption(id: UUID(), name: "1g", gramWeight: 1.0, isDefault: false)
+            ],
+            isCustom: true,
+            isVerified: true
+        )
+    }
+}
+
+struct AIFoodEstimate: Identifiable, Codable, Sendable {
+    var id: UUID = UUID()
+    var mealName: String
+    var items: [AIFoodItemEstimate]
+    
+    // Computed totals across all constituent items
+    var totalCalories: Double { items.reduce(0.0) { $0 + $1.calories } }
+    var totalProtein: Double { items.reduce(0.0) { $0 + $1.protein } }
+    var totalCarbs: Double { items.reduce(0.0) { $0 + $1.carbs } }
+    var totalFat: Double { items.reduce(0.0) { $0 + $1.fat } }
+    var totalGrams: Double { items.reduce(0.0) { $0 + $1.gramWeight } }
+    
+    // Convenience accessors
+    var foodName: String {
+        mealName.isEmpty ? (items.first?.name ?? "AI Meal") : mealName
+    }
+    var calories: Double { totalCalories }
+    var protein: Double { totalProtein }
+    var carbs: Double { totalCarbs }
+    var fat: Double { totalFat }
+    var estimatedGrams: Double { totalGrams }
+    var servingDescription: String {
+        items.count == 1 ? (items.first?.portionDescription ?? "1 serving") : "\(items.count) items"
+    }
+    var ingredientsDetected: [String] {
+        items.map { "\($0.name) (\($0.portionDescription))" }
+    }
+    var confidence: String = "High"
+    var fiber: Double? = nil
+    var sugar: Double? = nil
+    var sodium: Double? = nil
+    
+    enum CodingKeys: String, CodingKey {
+        case mealName, items, fiber, sugar, sodium, confidence
+        // Fallback decoding keys
+        case foodName, calories, protein, carbs, fat, servingDescription, estimatedGrams
+    }
+    
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(mealName, forKey: .mealName)
+        try container.encode(items, forKey: .items)
+        try container.encodeIfPresent(fiber, forKey: .fiber)
+        try container.encodeIfPresent(sugar, forKey: .sugar)
+        try container.encodeIfPresent(sodium, forKey: .sodium)
+        try container.encode(confidence, forKey: .confidence)
+    }
+    
+    init(mealName: String, items: [AIFoodItemEstimate]) {
+        self.id = UUID()
+        self.mealName = mealName
+        self.items = items
+    }
+    
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.id = UUID()
+        
+        if let decodedItems = try container.decodeIfPresent([AIFoodItemEstimate].self, forKey: .items), !decodedItems.isEmpty {
+            self.items = decodedItems
+            self.mealName = try container.decodeIfPresent(String.self, forKey: .mealName) ?? (decodedItems.first?.name ?? "AI Meal")
+        } else {
+            // Single-item fallback for backwards compatibility
+            let name = try container.decodeIfPresent(String.self, forKey: .foodName)
+                ?? (try container.decodeIfPresent(String.self, forKey: .mealName) ?? "AI Meal")
+            let cals = try container.decodeIfPresent(Double.self, forKey: .calories) ?? 0.0
+            let p = try container.decodeIfPresent(Double.self, forKey: .protein) ?? 0.0
+            let c = try container.decodeIfPresent(Double.self, forKey: .carbs) ?? 0.0
+            let f = try container.decodeIfPresent(Double.self, forKey: .fat) ?? 0.0
+            let desc = try container.decodeIfPresent(String.self, forKey: .servingDescription) ?? "1 serving"
+            let grams = try container.decodeIfPresent(Double.self, forKey: .estimatedGrams) ?? 100.0
+            
+            let single = AIFoodItemEstimate(
+                name: name,
+                calories: cals,
+                protein: p,
+                carbs: c,
+                fat: f,
+                portionDescription: desc,
+                gramWeight: grams
+            )
+            self.mealName = name
+            self.items = [single]
+        }
+        
+        self.fiber = try container.decodeIfPresent(Double.self, forKey: .fiber)
+        self.sugar = try container.decodeIfPresent(Double.self, forKey: .sugar)
+        self.sodium = try container.decodeIfPresent(Double.self, forKey: .sodium)
+        self.confidence = try container.decodeIfPresent(String.self, forKey: .confidence) ?? "High"
+    }
+    
+    func toFoodItem() -> FoodItem {
+        if items.count == 1, let first = items.first {
+            return first.toFoodItem()
+        }
+        
+        let grams = max(10.0, totalGrams)
+        let factor = 100.0 / grams
+        
+        let nutrients100g = NutrientInfo(
+            calories: totalCalories * factor,
+            protein: totalProtein * factor,
+            carbs: totalCarbs * factor,
+            fat: totalFat * factor,
+            fiber: fiber.map { $0 * factor },
+            sugar: sugar.map { $0 * factor },
+            sodium: sodium.map { $0 * factor }
+        )
+        
+        let defaultServing = ServingOption(
+            id: UUID(),
+            name: "\(Int(grams))g (\(items.count) items)",
+            gramWeight: grams,
+            isDefault: true
+        )
+        
+        return FoodItem(
+            id: UUID(),
+            barcode: nil,
+            name: mealName,
             brand: "AI Estimated",
             category: "AI Meal Scan",
             nutrientsPer100g: nutrients100g,
@@ -145,7 +275,7 @@ actor AIFoodScannerService {
         return URLSession(configuration: config)
     }()
     
-    // MARK: - Natural Language Text Description Analysis
+    // MARK: - Natural Language Text Description Analysis (Separated Items)
     func analyzeFoodDescription(text: String, apiKey: String) async throws -> AIFoodEstimate {
         let cleanKey = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !cleanKey.isEmpty else {
@@ -191,23 +321,30 @@ actor AIFoodScannerService {
         }
         
         let promptText = """
-        You are an expert clinical dietitian, nutritionist, and calorie tracker.
+        You are an expert clinical dietitian and calorie tracker.
         The user describes what they ate: "\(description)".
-        Accurately determine all ingredients/items mentioned, realistic standard portion sizes, total weight in grams, total calories (kcal), and macronutrients (protein, carbs, fat, fiber, sugar, sodium).
+        Identify EVERY separate food item mentioned (e.g. eggs, bacon bits, olive oil, toast).
+        For EACH item separately, accurately determine:
+        - Concise item name
+        - Realistic portion size description (e.g. "3 large eggs (150g)")
+        - Weight in grams
+        - Calories (kcal)
+        - Macronutrients: protein, carbs, fat in grams
+        
         Return ONLY valid JSON matching this schema:
         {
-          "foodName": "Concise descriptive meal name",
-          "calories": 450,
-          "protein": 35,
-          "carbs": 40,
-          "fat": 12,
-          "fiber": 5,
-          "sugar": 4,
-          "sodium": 500,
-          "servingDescription": "Total portion (e.g. 1 bowl (350g) or 2 eggs + 1 toast)",
-          "estimatedGrams": 350,
-          "ingredientsDetected": ["2 scrambled eggs", "1 slice sourdough", "10g butter"],
-          "confidence": "High"
+          "mealName": "Concise overall meal title",
+          "items": [
+            {
+              "name": "Food item name",
+              "calories": 215,
+              "protein": 18.0,
+              "carbs": 1.0,
+              "fat": 15.0,
+              "portionDescription": "Portion text (e.g. 3 large eggs)",
+              "gramWeight": 150.0
+            }
+          ]
         }
         """
         
@@ -234,14 +371,13 @@ actor AIFoodScannerService {
         return try parseGeminiResponse(data: data, response: response, cleanModel: cleanModel)
     }
     
-    // MARK: - Photo Analysis
+    // MARK: - Photo Analysis (Separated Items)
     func analyzeFood(image: UIImage, apiKey: String) async throws -> AIFoodEstimate {
         let cleanKey = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !cleanKey.isEmpty else {
             throw AIScannerError.missingApiKey
         }
         
-        // Fast, light 512px image payload (~30KB)
         let resized = resizeImage(image, maxDimension: 512)
         guard let jpegData = resized.jpegData(compressionQuality: 0.6) else {
             throw AIScannerError.imageCompressionFailed
@@ -287,22 +423,30 @@ actor AIFoodScannerService {
         }
         
         let promptText = """
-        You are an expert nutritionist. Analyze the food in this image.
-        Estimate total portion in grams, calories, and macros (protein, carbs, fat, fiber, sugar, sodium).
+        You are an expert clinical dietitian and nutritionist.
+        Analyze all food items visible in this image.
+        Identify EVERY separate food item (e.g. 3 eggs, bacon bits, olive oil, salad).
+        For EACH item separately, estimate:
+        - Concise item name
+        - Realistic portion size description
+        - Weight in grams
+        - Calories (kcal)
+        - Macronutrients: protein, carbs, fat in grams
+        
         Return ONLY valid JSON matching this schema:
         {
-          "foodName": "Meal name",
-          "calories": 450,
-          "protein": 35,
-          "carbs": 40,
-          "fat": 12,
-          "fiber": 5,
-          "sugar": 4,
-          "sodium": 500,
-          "servingDescription": "1 plate (320g)",
-          "estimatedGrams": 320,
-          "ingredientsDetected": ["item 1", "item 2"],
-          "confidence": "High"
+          "mealName": "Overall meal name",
+          "items": [
+            {
+              "name": "Food item name",
+              "calories": 250,
+              "protein": 30.0,
+              "carbs": 0.0,
+              "fat": 5.0,
+              "portionDescription": "1 breast (180g)",
+              "gramWeight": 180.0
+            }
+          ]
         }
         """
         
