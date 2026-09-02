@@ -54,8 +54,8 @@ struct FoodSearchView: View {
     ]
     @State private var isEstimatingList: Bool = false
     @State private var estimatedAIResult: AIFoodEstimate? = nil
-    @State private var showAITextSheet: Bool = false
-    @State private var listEstimatePrompt: String = ""
+    @State private var listErrorMessage: String? = nil
+    @State private var showErrorAlert: Bool = false
     
     // Scan Mode State
     @State private var scanMode: ScanSubMode = .photo
@@ -138,15 +138,22 @@ struct FoodSearchView: View {
             .sheet(isPresented: $showApiKeySheet) {
                 ApiKeySetupSheet(dataStore: dataStore)
             }
-            .sheet(isPresented: $showAITextSheet) {
-                AITextFoodLogSheet(
+            .sheet(item: $estimatedAIResult) { estimate in
+                AIEstimateResultSheet(
                     dataStore: dataStore,
+                    estimate: estimate,
                     preselectedMeal: activeMealInList,
                     targetDate: targetDate,
-                    initialText: listEstimatePrompt,
-                    initialEstimate: estimatedAIResult,
                     onLogged: { dismiss() }
                 )
+            }
+            .alert("Could Not Estimate Meal", isPresented: $showErrorAlert) {
+                if listErrorMessage?.contains("API key") == true {
+                    Button("Set API Key") { showApiKeySheet = true }
+                }
+                Button("OK", role: .cancel) { }
+            } message: {
+                Text(listErrorMessage ?? "An error occurred while estimating your meal.")
             }
         }
     }
@@ -720,9 +727,9 @@ struct FoodSearchView: View {
             return
         }
         
-        listEstimatePrompt = prompt
         isEstimatingList = true
         estimatedAIResult = nil
+        listErrorMessage = nil
         
         Task {
             do {
@@ -730,12 +737,12 @@ struct FoodSearchView: View {
                 await MainActor.run {
                     self.estimatedAIResult = estimate
                     self.isEstimatingList = false
-                    self.showAITextSheet = true
                 }
             } catch {
                 await MainActor.run {
                     self.isEstimatingList = false
-                    self.showAITextSheet = true
+                    self.listErrorMessage = error.localizedDescription
+                    self.showErrorAlert = true
                 }
             }
         }

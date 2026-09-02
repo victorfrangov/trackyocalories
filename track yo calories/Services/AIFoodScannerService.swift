@@ -7,7 +7,8 @@ import Foundation
 import SwiftUI
 import UIKit
 
-struct AIFoodEstimate: Codable, Sendable {
+struct AIFoodEstimate: Identifiable, Codable, Sendable {
+    var id: UUID = UUID()
     var foodName: String
     var calories: Double
     var protein: Double
@@ -20,6 +21,56 @@ struct AIFoodEstimate: Codable, Sendable {
     var estimatedGrams: Double
     var ingredientsDetected: [String]
     var confidence: String
+    
+    enum CodingKeys: String, CodingKey {
+        case foodName, calories, protein, carbs, fat, fiber, sugar, sodium, servingDescription, estimatedGrams, ingredientsDetected, confidence
+    }
+    
+    init(
+        foodName: String,
+        calories: Double,
+        protein: Double,
+        carbs: Double,
+        fat: Double,
+        fiber: Double? = nil,
+        sugar: Double? = nil,
+        sodium: Double? = nil,
+        servingDescription: String = "1 serving",
+        estimatedGrams: Double = 100.0,
+        ingredientsDetected: [String] = [],
+        confidence: String = "High"
+    ) {
+        self.id = UUID()
+        self.foodName = foodName
+        self.calories = calories
+        self.protein = protein
+        self.carbs = carbs
+        self.fat = fat
+        self.fiber = fiber
+        self.sugar = sugar
+        self.sodium = sodium
+        self.servingDescription = servingDescription
+        self.estimatedGrams = estimatedGrams
+        self.ingredientsDetected = ingredientsDetected
+        self.confidence = confidence
+    }
+    
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.id = UUID()
+        self.foodName = try container.decode(String.self, forKey: .foodName)
+        self.calories = try container.decode(Double.self, forKey: .calories)
+        self.protein = try container.decode(Double.self, forKey: .protein)
+        self.carbs = try container.decode(Double.self, forKey: .carbs)
+        self.fat = try container.decode(Double.self, forKey: .fat)
+        self.fiber = try container.decodeIfPresent(Double.self, forKey: .fiber)
+        self.sugar = try container.decodeIfPresent(Double.self, forKey: .sugar)
+        self.sodium = try container.decodeIfPresent(Double.self, forKey: .sodium)
+        self.servingDescription = try container.decodeIfPresent(String.self, forKey: .servingDescription) ?? "1 serving"
+        self.estimatedGrams = try container.decodeIfPresent(Double.self, forKey: .estimatedGrams) ?? 100.0
+        self.ingredientsDetected = try container.decodeIfPresent([String].self, forKey: .ingredientsDetected) ?? []
+        self.confidence = try container.decodeIfPresent(String.self, forKey: .confidence) ?? "Medium"
+    }
     
     func toFoodItem() -> FoodItem {
         let grams = max(10.0, estimatedGrams)
@@ -83,12 +134,12 @@ enum AIScannerError: LocalizedError {
 actor AIFoodScannerService {
     static let shared = AIFoodScannerService()
     
-    private var preferredModel: String = "gemini-3.6-flash"
+    private var preferredModel: String = "gemini-2.0-flash"
     
     private let session: URLSession = {
         let config = URLSessionConfiguration.default
-        config.timeoutIntervalForRequest = 15.0
-        config.timeoutIntervalForResource = 25.0
+        config.timeoutIntervalForRequest = 12.0
+        config.timeoutIntervalForResource = 20.0
         config.httpShouldUsePipelining = true
         config.waitsForConnectivity = false
         return URLSession(configuration: config)
@@ -103,9 +154,8 @@ actor AIFoodScannerService {
         
         let candidateModels = [
             preferredModel,
-            "gemini-3.6-flash",
-            "gemini-2.5-flash",
-            "gemini-1.5-flash-latest"
+            "gemini-2.0-flash",
+            "gemini-1.5-flash"
         ]
         
         var lastError: Error = AIScannerError.invalidResponse
@@ -166,7 +216,8 @@ actor AIFoodScannerService {
                 ]
             ],
             "generationConfig": [
-                "responseMimeType": "application/json"
+                "responseMimeType": "application/json",
+                "temperature": 0.2
             ]
         ]
         
@@ -195,9 +246,8 @@ actor AIFoodScannerService {
         
         let candidateModels = [
             preferredModel,
-            "gemini-3.6-flash",
-            "gemini-2.5-flash",
-            "gemini-1.5-flash-latest"
+            "gemini-2.0-flash",
+            "gemini-1.5-flash"
         ]
         
         var lastError: Error = AIScannerError.invalidResponse
@@ -263,7 +313,8 @@ actor AIFoodScannerService {
                 ]
             ],
             "generationConfig": [
-                "responseMimeType": "application/json"
+                "responseMimeType": "application/json",
+                "temperature": 0.2
             ]
         ]
         
