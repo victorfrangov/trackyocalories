@@ -844,9 +844,27 @@ struct FoodSearchView: View {
                     .cornerRadius(18)
                     .padding(.horizontal, 16)
                 } else {
-                    ForEach(dataStore.recipes) { recipe in
-                        fitiaFoodRow(item: recipe.toFoodItem())
+                    VStack(spacing: 0) {
+                        ForEach(dataStore.recipes) { recipe in
+                            let foodItem = recipe.toFoodItem()
+                            NavigationLink(destination: FoodDetailView(
+                                food: foodItem,
+                                dataStore: dataStore,
+                                targetMeal: preselectedMeal,
+                                targetDate: targetDate,
+                                onLogged: { dismiss() }
+                            )) {
+                                fitiaFoodRow(item: foodItem)
+                            }
+                            .buttonStyle(.plain)
+                            
+                            Divider()
+                                .padding(.leading, 56)
+                        }
                     }
+                    .background(Color(.secondarySystemGroupedBackground))
+                    .cornerRadius(16)
+                    .padding(.horizontal, 16)
                 }
             }
             .padding(.bottom, 100)

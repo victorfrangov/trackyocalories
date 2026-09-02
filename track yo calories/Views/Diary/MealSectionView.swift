@@ -13,6 +13,10 @@ struct MealSectionView: View {
     var onScanBarcode: (MealType) -> Void
     var onEditEntry: (LoggedEntry) -> Void
     
+    @State private var showSaveRecipeSheet: Bool = false
+    @State private var newRecipeTitle: String = ""
+    @State private var showSavedAlert: Bool = false
+    
     var entries: [LoggedEntry] {
         dataStore.entries(for: dataStore.selectedDate, meal: mealType)
     }
@@ -70,6 +74,13 @@ struct MealSectionView: View {
                     }
                     
                     if !entries.isEmpty {
+                        Button(action: {
+                            newRecipeTitle = "\(mealType.displayName) Recipe"
+                            showSaveRecipeSheet = true
+                        }) {
+                            Label("Save as Recipe", systemImage: "sparkles")
+                        }
+                        
                         Button(role: .destructive, action: { clearMeal() }) {
                             Label("Clear \(mealType.displayName)", systemImage: "trash")
                         }
@@ -109,6 +120,45 @@ struct MealSectionView: View {
         .padding(18)
         .background(Color(.secondarySystemGroupedBackground))
         .cornerRadius(24)
+        .alert("Save Meal as Recipe", isPresented: $showSaveRecipeSheet) {
+            TextField("Recipe Name", text: $newRecipeTitle)
+            Button("Save") {
+                saveMealAsRecipe()
+            }
+            Button("Cancel", role: .cancel) { }
+        } message: {
+            Text("Create a reusable recipe containing all \(entries.count) ingredients from this \(mealType.displayName.lowercased()).")
+        }
+        .alert("Recipe Saved!", isPresented: $showSavedAlert) {
+            Button("OK", role: .cancel) { }
+        } message: {
+            Text("\"\(newRecipeTitle)\" is now saved in your Recipes tab.")
+        }
+    }
+    
+    private func saveMealAsRecipe() {
+        let ingredients = entries.map { entry in
+            RecipeIngredient(
+                id: UUID(),
+                food: entry.food,
+                servingOption: entry.servingOption,
+                quantity: entry.quantity
+            )
+        }
+        
+        let title = newRecipeTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "\(mealType.displayName) Recipe" : newRecipeTitle
+        let recipe = Recipe(
+            id: UUID(),
+            name: title,
+            servings: 1,
+            ingredients: ingredients,
+            createdAt: Date()
+        )
+        
+        dataStore.addRecipe(recipe)
+        dataStore.addCustomFood(recipe.toFoodItem())
+        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+        showSavedAlert = true
     }
     
     private func duplicateFromYesterday() {
