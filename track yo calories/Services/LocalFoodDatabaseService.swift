@@ -64,16 +64,25 @@ final class LocalFoodDatabaseService: @unchecked Sendable {
             whereClauses.append("(name LIKE ? OR brand LIKE ? OR category LIKE ?)")
         }
         
+        let lowered = trimmed.lowercased()
         let sql = """
         SELECT id, barcode, name, brand, category, calories, protein, carbs, fat, fiber, sugar, saturated_fat, sodium, potassium, cholesterol, serving_options_json, origin
         FROM foods
         WHERE \(whereClauses.joined(separator: " AND "))
         ORDER BY 
             CASE 
-                WHEN name LIKE ? THEN 1
-                WHEN name LIKE ? THEN 2
-                ELSE 3
+                WHEN LOWER(name) = ? THEN 1
+                WHEN LOWER(name) LIKE ? OR LOWER(name) LIKE ? OR LOWER(name) LIKE ? THEN 2
+                WHEN LOWER(name) LIKE ? THEN 3
+                WHEN LOWER(name) LIKE ? THEN 4
+                ELSE 5
             END,
+            CASE
+                WHEN LOWER(name) LIKE '%dried%' THEN 5
+                WHEN LOWER(name) LIKE '%raw%' OR LOWER(name) LIKE '%fresh%' OR LOWER(name) LIKE '%large%' THEN 1
+                WHEN LOWER(name) LIKE '%whole%' THEN 2
+                ELSE 3
+            END ASC,
             LENGTH(name) ASC
         LIMIT \(limit);
         """
@@ -99,11 +108,27 @@ final class LocalFoodDatabaseService: @unchecked Sendable {
             bindIndex += 1
         }
         
-        // Exact prefix ordering patterns
-        let prefixPattern = "\(trimmed)%"
-        let subPattern = "%\(trimmed)%"
+        // Smart ordering patterns
+        sqlite3_bind_text(statement, bindIndex, (lowered as NSString).utf8String, -1, nil)
+        bindIndex += 1
+        
+        let pSpace = "\(lowered) %"
+        sqlite3_bind_text(statement, bindIndex, (pSpace as NSString).utf8String, -1, nil)
+        bindIndex += 1
+        
+        let pComma = "\(lowered), %"
+        sqlite3_bind_text(statement, bindIndex, (pComma as NSString).utf8String, -1, nil)
+        bindIndex += 1
+        
+        let pParen = "\(lowered) (%"
+        sqlite3_bind_text(statement, bindIndex, (pParen as NSString).utf8String, -1, nil)
+        bindIndex += 1
+        
+        let prefixPattern = "\(lowered)%"
         sqlite3_bind_text(statement, bindIndex, (prefixPattern as NSString).utf8String, -1, nil)
         bindIndex += 1
+        
+        let subPattern = "%\(lowered)%"
         sqlite3_bind_text(statement, bindIndex, (subPattern as NSString).utf8String, -1, nil)
         
         var results: [FoodItem] = []

@@ -577,7 +577,10 @@ struct FoodSearchView: View {
     
     // MARK: - Fitia Food Row Component
     private func fitiaFoodRow(item: FoodItem) -> some View {
-        HStack(spacing: 12) {
+        let defaultOption = item.effectiveServingOptions.first(where: { $0.isDefault }) ?? item.effectiveServingOptions.first ?? ServingOption.grams(100.0)
+        let servingCalories = defaultOption.gramWeight > 0 ? (item.nutrientsPer100g.calories * defaultOption.gramWeight / 100.0) : item.nutrientsPer100g.calories
+        
+        return HStack(spacing: 12) {
             Text(emojiForFood(item))
                 .font(.system(size: 22))
                 .frame(width: 32)
@@ -605,12 +608,11 @@ struct FoodSearchView: View {
             Spacer()
             
             VStack(alignment: .trailing, spacing: 2) {
-                let defaultOption = item.effectiveServingOptions.first(where: { $0.isDefault }) ?? item.effectiveServingOptions.first
-                Text(defaultOption?.name ?? "100g")
+                Text(defaultOption.name)
                     .font(.system(size: 12))
                     .foregroundColor(.secondary)
                 
-                Text("\(Int(item.nutrientsPer100g.calories)) kcal")
+                Text("\(Int(servingCalories.rounded())) kcal")
                     .font(.system(size: 13, weight: .bold, design: .rounded))
                     .foregroundColor(.primary)
             }
