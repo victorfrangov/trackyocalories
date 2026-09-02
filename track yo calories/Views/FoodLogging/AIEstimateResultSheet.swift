@@ -137,16 +137,36 @@ struct AIEstimateResultSheet: View {
                     .font(.system(size: 14, weight: .semibold))
                     .foregroundColor(.secondary)
                 
-                Picker("Meal", selection: $selectedMeal) {
+                Menu {
                     ForEach(MealType.allCases) { meal in
-                        Text(meal.displayName).tag(meal)
+                        Button {
+                            selectedMeal = meal
+                        } label: {
+                            HStack {
+                                Text(meal.displayName)
+                                if selectedMeal == meal {
+                                    Image(systemName: "checkmark")
+                                }
+                            }
+                        }
                     }
+                } label: {
+                    HStack(spacing: 6) {
+                        Text(selectedMeal.displayName)
+                            .font(.system(size: 14, weight: .bold))
+                            .foregroundColor(.primary)
+                            .lineLimit(1)
+                            .fixedSize(horizontal: true, vertical: false)
+                        
+                        Image(systemName: "chevron.up.chevron.down")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundColor(.secondary)
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 6)
+                    .background(Color(.tertiarySystemGroupedBackground))
+                    .cornerRadius(10)
                 }
-                .pickerStyle(.menu)
-                .padding(.horizontal, 10)
-                .padding(.vertical, 4)
-                .background(Color(.tertiarySystemGroupedBackground))
-                .cornerRadius(10)
                 
                 Spacer()
                 
