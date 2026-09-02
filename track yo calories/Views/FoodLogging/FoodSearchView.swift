@@ -52,6 +52,12 @@ struct FoodSearchView: View {
         .dinner: [""],
         .snacks: [""]
     ]
+    
+    enum ListFieldFocus: Hashable {
+        case field(meal: MealType, index: Int)
+    }
+    
+    @FocusState private var focusedListField: ListFieldFocus?
     @State private var isEstimatingList: Bool = false
     @State private var estimatedAIResult: AIFoodEstimate? = nil
     @State private var listErrorMessage: String? = nil
@@ -687,20 +693,40 @@ struct FoodSearchView: View {
                         .fill(isSelected ? Color.orange : Color.secondary.opacity(0.4))
                         .frame(width: 7, height: 7)
                     
-                    TextField("Type a food (e.g. Croissant 1 medium)", text: Binding(
+                    TextField("Type a food (e.g. 3 eggs, croissant)", text: Binding(
                         get: { listInputs[meal]?[idx] ?? "" },
                         set: { listInputs[meal]?[idx] = $0 }
                     ))
                     .font(.system(size: 15))
+                    .focused($focusedListField, equals: .field(meal: meal, index: idx))
+                    .submitLabel(.next)
+                    .onSubmit {
+                        handleListEnterPress(meal: meal, currentIndex: idx)
+                    }
+                    .onTapGesture {
+                        activeMealInList = meal
+                    }
+                    
+                    if items.count > 1 && !(listInputs[meal]?[idx] ?? "").isEmpty {
+                        Button(action: {
+                            removeListLine(meal: meal, index: idx)
+                        }) {
+                            Image(systemName: "xmark.circle.fill")
+                                .font(.system(size: 14))
+                                .foregroundColor(.secondary.opacity(0.5))
+                        }
+                        .buttonStyle(.plain)
+                    }
                     
                     if idx == items.count - 1 {
                         Button(action: {
-                            listInputs[meal]?.append("")
+                            addNewLineAndFocus(meal: meal)
                         }) {
                             Image(systemName: "plus.circle.fill")
                                 .font(.system(size: 18))
                                 .foregroundColor(.secondary)
                         }
+                        .buttonStyle(.plain)
                     }
                 }
                 .padding(.vertical, 4)
@@ -717,6 +743,45 @@ struct FoodSearchView: View {
         .onTapGesture {
             activeMealInList = meal
         }
+    }
+    
+    private func handleListEnterPress(meal: MealType, currentIndex: Int) {
+        activeMealInList = meal
+        let count = listInputs[meal]?.count ?? 1
+        
+        if currentIndex == count - 1 {
+            // Append a new line and move cursor focus to it immediately
+            listInputs[meal]?.append("")
+            Task { @MainActor in
+                try? await Task.sleep(nanoseconds: 50_000_000)
+                focusedListField = .field(meal: meal, index: currentIndex + 1)
+            }
+        } else {
+            // Move cursor to the next line
+            focusedListField = .field(meal: meal, index: currentIndex + 1)
+        }
+    }
+    
+    private func addNewLineAndFocus(meal: MealType) {
+        activeMealInList = meal
+        listInputs[meal]?.append("")
+        let newIdx = (listInputs[meal]?.count ?? 1) - 1
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 50_000_000)
+            focusedListField = .field(meal: meal, index: newIdx)
+        }
+    }
+    
+    private func removeListLine(meal: MealType, index: Int) {
+        activeMealInList = meal
+        guard var arr = listInputs[meal], index < arr.count else { return }
+        arr.remove(at: index)
+        if arr.isEmpty {
+            arr = [""]
+        }
+        listInputs[meal] = arr
+        let prevIdx = max(0, index - 1)
+        focusedListField = .field(meal: meal, index: prevIdx)
     }
     
     private func submitListToAI() {
