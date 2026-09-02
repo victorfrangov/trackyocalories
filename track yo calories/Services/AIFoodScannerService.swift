@@ -134,7 +134,7 @@ enum AIScannerError: LocalizedError {
 actor AIFoodScannerService {
     static let shared = AIFoodScannerService()
     
-    private var preferredModel: String = "gemini-2.0-flash"
+    private var preferredModel: String = "gemini-3.5-flash-lite"
     
     private let session: URLSession = {
         let config = URLSessionConfiguration.default
@@ -154,6 +154,10 @@ actor AIFoodScannerService {
         
         let candidateModels = [
             preferredModel,
+            "gemini-3.5-flash-lite",
+            "gemini-3.5-flash",
+            "gemini-3.7-flash",
+            "gemini-flash-latest-high-res-exp",
             "gemini-2.0-flash",
             "gemini-1.5-flash"
         ]
@@ -246,6 +250,10 @@ actor AIFoodScannerService {
         
         let candidateModels = [
             preferredModel,
+            "gemini-3.5-flash",
+            "gemini-3.5-flash-lite",
+            "gemini-3.7-flash",
+            "gemini-flash-latest-high-res-exp",
             "gemini-2.0-flash",
             "gemini-1.5-flash"
         ]
@@ -344,8 +352,13 @@ actor AIFoodScannerService {
         }
         
         guard httpResponse.statusCode == 200 else {
+            if let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+               let err = root["error"] as? [String: Any],
+               let msg = err["message"] as? String {
+                throw AIScannerError.apiError(msg)
+            }
             let errorText = String(data: data, encoding: .utf8) ?? "HTTP \(httpResponse.statusCode)"
-            throw AIScannerError.apiError("Model \(cleanModel) error: \(errorText)")
+            throw AIScannerError.apiError("AI Service Error (\(httpResponse.statusCode)): \(errorText)")
         }
         
         guard let root = try JSONSerialization.jsonObject(with: data) as? [String: Any],
