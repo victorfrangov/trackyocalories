@@ -132,41 +132,11 @@ struct AIEstimateResultSheet: View {
     private var mealSummaryCard: some View {
         VStack(spacing: 14) {
             // Meal destination picker
+            // Header Row: "Log to Meal" & Item Count
             HStack {
-                Text("Log to")
-                    .font(.system(size: 14, weight: .semibold))
+                Text("Log to Meal")
+                    .font(.system(size: 14, weight: .bold))
                     .foregroundColor(.secondary)
-                
-                Menu {
-                    ForEach(MealType.allCases) { meal in
-                        Button {
-                            selectedMeal = meal
-                        } label: {
-                            HStack {
-                                Text(meal.displayName)
-                                if selectedMeal == meal {
-                                    Image(systemName: "checkmark")
-                                }
-                            }
-                        }
-                    }
-                } label: {
-                    HStack(spacing: 6) {
-                        Text(selectedMeal.displayName)
-                            .font(.system(size: 14, weight: .bold))
-                            .foregroundColor(.primary)
-                            .lineLimit(1)
-                            .fixedSize(horizontal: true, vertical: false)
-                        
-                        Image(systemName: "chevron.up.chevron.down")
-                            .font(.system(size: 11, weight: .semibold))
-                            .foregroundColor(.secondary)
-                    }
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 6)
-                    .background(Color(.tertiarySystemGroupedBackground))
-                    .cornerRadius(10)
-                }
                 
                 Spacer()
                 
@@ -178,6 +148,14 @@ struct AIEstimateResultSheet: View {
                     .background(Color.orange.opacity(0.12))
                     .cornerRadius(10)
             }
+            
+            // Segmented Meal Selector: completely smooth, zero jumping
+            Picker("Meal", selection: $selectedMeal) {
+                ForEach(MealType.allCases) { meal in
+                    Text(meal.displayName).tag(meal)
+                }
+            }
+            .pickerStyle(.segmented)
             
             Divider()
             
