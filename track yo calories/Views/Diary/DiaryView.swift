@@ -98,6 +98,9 @@ struct DiaryView: View {
                 }
             }
             .listStyle(.insetGrouped)
+            #if DEBUG
+            .onAppear(perform: applyScreenshotArguments)
+            #endif
             .navigationTitle(titleText)
             .toolbar { toolbarContent }
             .safeAreaInset(edge: .bottom) { bannerView }
@@ -281,6 +284,26 @@ struct DiaryView: View {
                 }
         }
     }
+
+    #if DEBUG
+    /// Simulator screenshots: `-screenshotDaysAgo 1 -screenshotSheet search|edit|nutrients|quickAdd|photo`
+    private func applyScreenshotArguments() {
+        let defaults = UserDefaults.standard
+        let daysAgo = defaults.integer(forKey: "screenshotDaysAgo")
+        if daysAgo != 0, let d = Calendar.current.date(byAdding: .day, value: -daysAgo, to: Date()) {
+            dataStore.selectedDate = d
+        }
+        switch defaults.string(forKey: "screenshotSheet") {
+        case "search": activeSheet = .search(.lunch)
+        case "nutrients": activeSheet = .nutrients
+        case "quickAdd": activeSheet = .quickAdd(.snacks)
+        case "photo": activeSheet = .photo(.dinner)
+        case "edit":
+            if let entry = dataStore.entries(for: dataStore.selectedDate).first { activeSheet = .edit(entry) }
+        default: break
+        }
+    }
+    #endif
 
     // MARK: - Actions
     private func copyFromYesterday(_ meal: MealType) {

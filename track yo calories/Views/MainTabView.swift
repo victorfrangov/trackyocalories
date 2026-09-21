@@ -7,8 +7,15 @@ import SwiftUI
 
 struct MainTabView: View {
     @ObservedObject var dataStore: DataStore
-    @State private var selectedTab: Int = 0
-    
+    @State private var selectedTab: Int = {
+        #if DEBUG
+        // Simulator screenshots: `-screenshotTab 1`
+        return UserDefaults.standard.integer(forKey: "screenshotTab")
+        #else
+        return 0
+        #endif
+    }()
+
     var body: some View {
         TabView(selection: $selectedTab) {
             DiaryView(dataStore: dataStore)

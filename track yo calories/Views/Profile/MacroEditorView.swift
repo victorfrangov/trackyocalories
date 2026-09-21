@@ -29,6 +29,18 @@ struct MacroEditorView: View {
     var calculatedTotalCaloriesFromMacros: Double {
         proteinGrams * 4 + carbsGrams * 4 + fatGrams * 9
     }
+
+    /// Editing any value switches to the Custom preset instead of requiring the user to pick it first.
+    private func customBinding(_ value: Binding<Double>) -> Binding<Double> {
+        Binding(
+            get: { value.wrappedValue },
+            set: { newValue in
+                guard newValue != value.wrappedValue else { return }
+                value.wrappedValue = newValue
+                if dietType != .custom { dietType = .custom }
+            }
+        )
+    }
     
     var body: some View {
         NavigationStack {
@@ -61,10 +73,9 @@ struct MacroEditorView: View {
                     HStack {
                         Text("Calories (kcal)")
                         Spacer()
-                        TextField("Calories", value: $calories, format: .number)
+                        DecimalField(title: "Calories", value: customBinding($calories), fractionDigits: 0)
                             .keyboardType(.numberPad)
                             .multilineTextAlignment(.trailing)
-                            .disabled(dietType != .custom)
                     }
                 }
                 
@@ -77,9 +88,8 @@ struct MacroEditorView: View {
                                 .foregroundColor(.orange)
                                 .bold()
                         }
-                        Slider(value: $proteinGrams, in: 20...400, step: 5)
+                        Slider(value: customBinding($proteinGrams), in: 20...400, step: 5)
                             .tint(.orange)
-                            .disabled(dietType != .custom)
                     }
                     
                     VStack(alignment: .leading, spacing: 6) {
@@ -90,9 +100,8 @@ struct MacroEditorView: View {
                                 .foregroundColor(.blue)
                                 .bold()
                         }
-                        Slider(value: $carbsGrams, in: 0...500, step: 5)
+                        Slider(value: customBinding($carbsGrams), in: 0...500, step: 5)
                             .tint(.blue)
-                            .disabled(dietType != .custom)
                     }
                     
                     VStack(alignment: .leading, spacing: 6) {
@@ -103,9 +112,8 @@ struct MacroEditorView: View {
                                 .foregroundColor(.purple)
                                 .bold()
                         }
-                        Slider(value: $fatGrams, in: 10...250, step: 5)
+                        Slider(value: customBinding($fatGrams), in: 10...250, step: 5)
                             .tint(.purple)
-                            .disabled(dietType != .custom)
                     }
                 }
                 
@@ -129,9 +137,15 @@ struct MacroEditorView: View {
                         Text("\(Int(calculatedTotalCaloriesFromMacros)) kcal")
                             .bold()
                     }
+
+                    if abs(calculatedTotalCaloriesFromMacros - calories) >= 25 {
+                        Button("Set Calorie Target to \(Int(calculatedTotalCaloriesFromMacros)) kcal") {
+                            customBinding($calories).wrappedValue = calculatedTotalCaloriesFromMacros.rounded()
+                        }
+                    }
                 }
             }
-            .navigationTitle("Adjust Nutrition Targets")
+            .navigationTitle("Calories & Macros")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {

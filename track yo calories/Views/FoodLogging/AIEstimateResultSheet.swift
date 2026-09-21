@@ -82,10 +82,8 @@ struct AIEstimateResultSheet: View {
                         HStack {
                             Text("Weight")
                             Spacer()
-                            TextField("g", value: gramsBinding($item), format: .number.precision(.fractionLength(0)))
-                                .keyboardType(.numberPad)
+                            DecimalField(title: "g", value: gramsBinding($item), fractionDigits: 0)
                                 .multilineTextAlignment(.trailing)
-                                .monospacedDigit()
                                 .frame(maxWidth: 70)
                             Text("g").foregroundStyle(.secondary)
                             Stepper("Weight", value: gramsBinding($item), in: 5...5000, step: 10)
@@ -164,10 +162,8 @@ struct AIEstimateResultSheet: View {
         HStack {
             Text(title)
             Spacer()
-            TextField(title, value: value, format: .number.precision(.fractionLength(0...1)))
-                .keyboardType(.decimalPad)
+            DecimalField(title: title, value: value, fractionDigits: 1)
                 .multilineTextAlignment(.trailing)
-                .monospacedDigit()
                 .frame(maxWidth: 90)
             Text(unit)
                 .foregroundStyle(.secondary)
@@ -184,10 +180,12 @@ struct AIEstimateResultSheet: View {
                 var updated = item.wrappedValue
                 let ratio = newGrams / max(1, updated.gramWeight)
                 updated.gramWeight = newGrams
-                updated.calories = (updated.calories * ratio).rounded()
-                updated.protein = (updated.protein * ratio * 10).rounded() / 10
-                updated.carbs = (updated.carbs * ratio * 10).rounded() / 10
-                updated.fat = (updated.fat * ratio * 10).rounded() / 10
+                // No rounding here: typing "150" passes through 1 → 15 → 150, and rounding at
+                // each step would lose precision. Values are rounded for display only.
+                updated.calories *= ratio
+                updated.protein *= ratio
+                updated.carbs *= ratio
+                updated.fat *= ratio
                 updated.portionDescription = "\(Int(newGrams)) g"
                 item.wrappedValue = updated
             }

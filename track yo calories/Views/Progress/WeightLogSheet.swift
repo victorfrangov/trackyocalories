@@ -77,7 +77,7 @@ struct WeightLogSheet: View {
             .onAppear {
                 let currentKg = dataStore.userProfile.weightKg
                 let display = unitSystem.kgToDisplay(currentKg)
-                weightText = String(format: "%.1f", display)
+                weightText = display.formatted(.number.precision(.fractionLength(1)).grouping(.never))
             }
             .navigationTitle("Log Weight")
             .navigationBarTitleDisplayMode(.inline)
@@ -89,18 +89,19 @@ struct WeightLogSheet: View {
                     Button("Save") {
                         saveWeightEntry()
                     }
+                    .disabled((Double(userInput: weightText) ?? 0) <= 0)
                 }
             }
         }
     }
     
     private func saveWeightEntry() {
-        guard let wVal = Double(weightText), wVal > 0 else { return }
+        guard let wVal = Double(userInput: weightText), wVal > 0 else { return }
         let kg = unitSystem.displayToKg(wVal)
-        let bf = Double(bodyFatText)
-        let waist = Double(waistText).map { unitSystem.displayToCm($0) }
-        let chest = Double(chestText).map { unitSystem.displayToCm($0) }
-        let hips = Double(hipsText).map { unitSystem.displayToCm($0) }
+        let bf = Double(userInput: bodyFatText)
+        let waist = Double(userInput: waistText).map { unitSystem.displayToCm($0) }
+        let chest = Double(userInput: chestText).map { unitSystem.displayToCm($0) }
+        let hips = Double(userInput: hipsText).map { unitSystem.displayToCm($0) }
         let note = notes.trimmingCharacters(in: .whitespaces).isEmpty ? nil : notes
         
         dataStore.logWeight(

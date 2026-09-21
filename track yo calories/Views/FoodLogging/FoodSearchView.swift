@@ -179,6 +179,7 @@ struct FoodSearchView: View {
             .frame(maxWidth: .infinity, minHeight: 56)
         }
         .buttonStyle(.bordered)
+        .buttonBorderShape(.roundedRectangle(radius: 14))
         .tint(.accentColor)
     }
 

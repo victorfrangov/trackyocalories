@@ -30,22 +30,40 @@ struct OnboardingView: View {
     // Step 5 State
     @State private var dietType: DietType = .highProtein
     
+    init(dataStore: DataStore) {
+        self.dataStore = dataStore
+        // Prefill with the saved profile so "Redo Setup" starts from the current values.
+        let p = dataStore.userProfile
+        let units = p.unitSystem
+        _name = State(initialValue: p.name == "User" ? "" : p.name)
+        _gender = State(initialValue: p.gender)
+        _age = State(initialValue: p.age)
+        _unitSystem = State(initialValue: units)
+        _heightDisplay = State(initialValue: (units.cmToDisplay(p.heightCm) * 10).rounded() / 10)
+        _weightDisplay = State(initialValue: (units.kgToDisplay(p.weightKg) * 10).rounded() / 10)
+        _targetWeightDisplay = State(initialValue: (units.kgToDisplay(p.targetWeightKg) * 10).rounded() / 10)
+        _goal = State(initialValue: p.goal)
+        _weeklyRateKg = State(initialValue: WeeklyPace.options(for: p.goal).contains(p.weeklyChangeKg) ? p.weeklyChangeKg : p.goal.defaultWeeklyChangeKg)
+        _activityLevel = State(initialValue: p.activityLevel)
+        _dietType = State(initialValue: p.dietType == .custom ? .highProtein : p.dietType)
+    }
+
+    /// The saved profile with the answers applied, so settings that onboarding doesn't ask
+    /// about (API key, meal split, water goal, custom macros) survive a re-run.
     var tempProfile: UserProfile {
-        UserProfile(
-            id: UUID(),
-            isOnboarded: false,
-            name: name.isEmpty ? "User" : name,
-            age: age,
-            gender: gender,
-            heightCm: unitSystem.displayToCm(heightDisplay),
-            weightKg: unitSystem.displayToKg(weightDisplay),
-            targetWeightKg: unitSystem.displayToKg(targetWeightDisplay),
-            weeklyChangeKg: weeklyRateKg,
-            activityLevel: activityLevel,
-            goal: goal,
-            dietType: dietType,
-            unitSystem: unitSystem
-        )
+        var p = dataStore.userProfile
+        p.name = name.trimmingCharacters(in: .whitespaces).isEmpty ? "User" : name.trimmingCharacters(in: .whitespaces)
+        p.age = age
+        p.gender = gender
+        p.heightCm = unitSystem.displayToCm(heightDisplay)
+        p.weightKg = unitSystem.displayToKg(weightDisplay)
+        p.targetWeightKg = unitSystem.displayToKg(targetWeightDisplay)
+        p.weeklyChangeKg = goal == .maintenance ? 0 : weeklyRateKg
+        p.activityLevel = activityLevel
+        p.goal = goal
+        p.dietType = dietType
+        p.unitSystem = unitSystem
+        return p
     }
     
     var calculatedTargets: MacroTargets {
@@ -154,20 +172,18 @@ struct OnboardingView: View {
             
             Picker("Unit System", selection: $unitSystem) {
                 ForEach(UnitSystem.allCases) { u in
-                    Text(u.rawValue).tag(u)
+                    Text(u == .metric ? "Metric" : "Imperial").tag(u)
                 }
             }
             .pickerStyle(.segmented)
-            .onChange(of: unitSystem) { _, newSystem in
-                if newSystem == .imperial {
-                    heightDisplay = 70.0 // inches
-                    weightDisplay = 165.0 // lbs
-                    targetWeightDisplay = 158.0
-                } else {
-                    heightDisplay = 178.0 // cm
-                    weightDisplay = 75.0 // kg
-                    targetWeightDisplay = 72.0
+            .onChange(of: unitSystem) { oldSystem, newSystem in
+                // Convert what was entered instead of resetting to defaults.
+                func convert(_ value: Double, _ toBase: (Double) -> Double, _ fromBase: (Double) -> Double) -> Double {
+                    (fromBase(toBase(value)) * 10).rounded() / 10
                 }
+                heightDisplay = convert(heightDisplay, oldSystem.displayToCm, newSystem.cmToDisplay)
+                weightDisplay = convert(weightDisplay, oldSystem.displayToKg, newSystem.kgToDisplay)
+                targetWeightDisplay = convert(targetWeightDisplay, oldSystem.displayToKg, newSystem.kgToDisplay)
             }
             
             VStack(alignment: .leading, spacing: 8) {
@@ -199,7 +215,7 @@ struct OnboardingView: View {
                     .font(.system(size: 14, weight: .semibold))
                     .foregroundColor(.secondary)
                 
-                TextField("Height", value: $heightDisplay, format: .number)
+                DecimalField(title: "Height", value: $heightDisplay)
                     .keyboardType(.decimalPad)
                     .padding()
                     .background(Color(.secondarySystemGroupedBackground))
@@ -211,7 +227,7 @@ struct OnboardingView: View {
                     .font(.system(size: 14, weight: .semibold))
                     .foregroundColor(.secondary)
                 
-                TextField("Weight", value: $weightDisplay, format: .number)
+                DecimalField(title: "Weight", value: $weightDisplay)
                     .keyboardType(.decimalPad)
                     .padding()
                     .background(Color(.secondarySystemGroupedBackground))
@@ -269,11 +285,30 @@ struct OnboardingView: View {
                     .font(.system(size: 14, weight: .semibold))
                     .foregroundColor(.secondary)
                 
-                TextField("Target Weight", value: $targetWeightDisplay, format: .number)
-                    .keyboardType(.decimalPad)
+                DecimalField(title: "Target Weight", value: $targetWeightDisplay)
                     .padding()
                     .background(Color(.secondarySystemGroupedBackground))
                     .cornerRadius(12)
+            }
+
+            if goal != .maintenance {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Weekly Pace")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundColor(.secondary)
+
+                    Picker("Weekly Pace", selection: $weeklyRateKg) {
+                        ForEach(WeeklyPace.options(for: goal), id: \.self) { kg in
+                            Text(WeeklyPace.label(kg, unitSystem: unitSystem)).tag(kg)
+                        }
+                    }
+                    .pickerStyle(.menu)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.vertical, 8)
+                    .padding(.horizontal, 6)
+                    .background(Color(.secondarySystemGroupedBackground))
+                    .cornerRadius(12)
+                }
             }
         }
     }
@@ -400,16 +435,15 @@ struct OnboardingView: View {
         if currentStep < 5 {
             withAnimation { currentStep += 1 }
         } else {
-            // Save completed onboarding profile
             var profile = tempProfile
             profile.isOnboarded = true
+            let latestLogged = dataStore.weightEntries.max(by: { $0.date < $1.date })?.weightKg
             dataStore.userProfile = profile
-            
-            // Save initial weight log
-            dataStore.logWeight(
-                weightKg: profile.weightKg,
-                date: Date()
-            )
+
+            // Record a weigh-in only when it's new information.
+            if latestLogged == nil || abs((latestLogged ?? 0) - profile.weightKg) >= 0.05 {
+                dataStore.logWeight(weightKg: profile.weightKg, date: Date())
+            }
         }
     }
 }

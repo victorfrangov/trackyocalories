@@ -71,28 +71,28 @@ struct MicronutrientDetailView: View {
                         name: "Dietary Fiber",
                         value: "\(String(format: "%.1f", totalFiber)) g",
                         guide: "Target: ≥ 28g / day",
-                        status: totalFiber >= 25 ? .good : .neutral
+                        status: totalFiber >= 28 ? .good : .neutral
                     )
                     
                     MicroNutrientRow(
                         name: "Sugars",
                         value: "\(String(format: "%.1f", totalSugar)) g",
                         guide: "Recommended: < 50g / day",
-                        status: totalSugar > 60 ? .warning : .good
+                        status: totalSugar > 50 ? .warning : .good
                     )
                     
                     MicroNutrientRow(
                         name: "Saturated Fat",
                         value: "\(String(format: "%.1f", totalSatFat)) g",
                         guide: "Recommended: < 20g / day",
-                        status: totalSatFat > 25 ? .warning : .good
+                        status: totalSatFat > 20 ? .warning : .good
                     )
                     
                     MicroNutrientRow(
                         name: "Sodium",
                         value: "\(Int(totalSodium)) mg",
                         guide: "Recommended: < 2300 mg / day",
-                        status: totalSodium > 2500 ? .warning : .good
+                        status: totalSodium > 2300 ? .warning : .good
                     )
                     
                     MicroNutrientRow(
@@ -106,7 +106,7 @@ struct MicronutrientDetailView: View {
                         name: "Cholesterol",
                         value: "\(Int(totalCholesterol)) mg",
                         guide: "Recommended: < 300 mg / day",
-                        status: totalCholesterol > 350 ? .warning : .good
+                        status: totalCholesterol > 300 ? .warning : .good
                     )
                 }
             }
