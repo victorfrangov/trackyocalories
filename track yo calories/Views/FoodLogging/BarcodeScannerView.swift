@@ -20,7 +20,12 @@ struct BarcodeScannerView: View {
     @State private var manualBarcodeInput: String = ""
     @State private var showManualInputSheet: Bool = false
     @State private var isLaserAnimating: Bool = false
-    
+
+    private var cameraDenied: Bool {
+        let status = AVCaptureDevice.authorizationStatus(for: .video)
+        return status == .denied || status == .restricted
+    }
+
     var body: some View {
         ZStack {
             // Camera Preview / Simulator Fallback
@@ -51,13 +56,36 @@ struct BarcodeScannerView: View {
                 .padding(.top, 8)
             }
             #else
-            CameraScannerRepresentable(
-                isFlashlightOn: $isFlashlightOn,
-                onBarcodeScanned: { code in
-                    handleScannedCode(code)
+            if cameraDenied {
+                Color.black.ignoresSafeArea()
+                VStack(spacing: 14) {
+                    Image(systemName: "camera.fill")
+                        .font(.system(size: 40))
+                        .foregroundStyle(.white.opacity(0.7))
+                    Text("Camera Access Is Off")
+                        .font(.headline)
+                        .foregroundStyle(.white)
+                    Text("Allow camera access in Settings to scan barcodes, or type the number instead.")
+                        .font(.subheadline)
+                        .foregroundStyle(.white.opacity(0.7))
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, 32)
+                    Button("Open Settings") {
+                        if let url = URL(string: UIApplication.openSettingsURLString) {
+                            UIApplication.shared.open(url)
+                        }
+                    }
+                    .buttonStyle(.borderedProminent)
                 }
-            )
-            .ignoresSafeArea()
+            } else {
+                CameraScannerRepresentable(
+                    isFlashlightOn: $isFlashlightOn,
+                    onBarcodeScanned: { code in
+                        handleScannedCode(code)
+                    }
+                )
+                .ignoresSafeArea()
+            }
             #endif
             
             // Darkened Vignette Overlay with transparent cutout for scanning frame
@@ -211,43 +239,37 @@ struct BarcodeScannerView: View {
     
     // MARK: - Handle Scanned Barcode
     private func handleScannedCode(_ code: String) {
-        guard !isLoadingProduct else { return }
-        
+        // Ignore frames while a lookup, result sheet or message is showing; otherwise a barcode
+        // still in view re-opens the detail sheet and discards what the user was editing.
+        guard !isLoadingProduct, scannedFood == nil, errorMessage == nil, !showManualInputSheet else { return }
+
         let cleaned = code.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !cleaned.isEmpty else { return }
-        
+
         UIImpactFeedbackGenerator(style: .medium).impactOccurred()
         isLoadingProduct = true
-        
+
         Task {
-            // 1. Check local offline database first
-            let localMatches = LocalFoodDatabaseService.shared.search(query: cleaned)
-            if let matched = localMatches.first(where: { $0.barcode == cleaned }) {
-                await MainActor.run {
-                    isLoadingProduct = false
-                    scannedFood = matched
-                }
+            // 1. Previously scanned or created foods, then the bundled database
+            if let known = (dataStore.recentFoods + dataStore.customFoods).first(where: { $0.barcode == cleaned })
+                ?? LocalFoodDatabaseService.shared.food(barcode: cleaned) {
+                isLoadingProduct = false
+                scannedFood = known
                 return
             }
-            
-            // 2. Fetch from live OpenFoodFacts API
+
+            // 2. Open Food Facts
             do {
-                if let product = try await OpenFoodFactsService.shared.fetchProduct(barcode: cleaned) {
-                    await MainActor.run {
-                        isLoadingProduct = false
-                        scannedFood = product
-                    }
+                let product = try await OpenFoodFactsService.shared.fetchProduct(barcode: cleaned)
+                isLoadingProduct = false
+                if let product {
+                    scannedFood = product
                 } else {
-                    await MainActor.run {
-                        isLoadingProduct = false
-                        errorMessage = "Barcode '\(cleaned)' not found in offline or online database. You can add it manually via Quick Add."
-                    }
+                    errorMessage = "No product found for barcode \(cleaned). Try searching for it by name, or use Quick Add."
                 }
             } catch {
-                await MainActor.run {
-                    isLoadingProduct = false
-                    errorMessage = "Unable to connect to database. Please check your internet connection."
-                }
+                isLoadingProduct = false
+                errorMessage = "Couldn’t reach Open Food Facts. Check your internet connection and try again."
             }
         }
     }
@@ -415,8 +437,8 @@ final class BarcodeScannerViewController: UIViewController, AVCaptureMetadataOut
             session.addOutput(metadataOutput)
             metadataOutput.setMetadataObjectsDelegate(self, queue: DispatchQueue.main)
             metadataOutput.metadataObjectTypes = [
-                .ean13, .ean8, .upce, .code128, .code39, .code93, .qr, .dataMatrix
-            ]
+                .ean13, .ean8, .upce, .code128, .code93
+            ].filter { metadataOutput.availableMetadataObjectTypes.contains($0) }
         } else {
             return
         }
@@ -428,10 +450,7 @@ final class BarcodeScannerViewController: UIViewController, AVCaptureMetadataOut
         
         self.captureSession = session
         self.previewLayer = preview
-        
-        DispatchQueue.global(qos: .userInitiated).async {
-            session.startRunning()
-        }
+        // Started in viewWillAppear, which always follows viewDidLoad.
     }
     
     func metadataOutput(_ output: AVCaptureMetadataOutput, didOutput metadataObjects: [AVMetadataObject], from connection: AVCaptureConnection) {

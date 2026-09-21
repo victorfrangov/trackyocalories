@@ -23,16 +23,7 @@ final class LocalFoodDatabaseService: @unchecked Sendable {
     }
     
     private func openDatabase() {
-        // Look in Bundle first, then fallback to current directory
-        var dbUrl = Bundle.main.url(forResource: "FoodDatabase", withExtension: "sqlite")
-        if dbUrl == nil {
-            let directPath = "/Users/victor/dev/track yo calories/track yo calories/track yo calories/FoodDatabase.sqlite"
-            if FileManager.default.fileExists(atPath: directPath) {
-                dbUrl = URL(fileURLWithPath: directPath)
-            }
-        }
-        
-        guard let url = dbUrl else {
+        guard let url = Bundle.main.url(forResource: "FoodDatabase", withExtension: "sqlite") else {
             print("LocalFoodDatabaseService: FoodDatabase.sqlite not found in bundle.")
             return
         }
@@ -141,6 +132,21 @@ final class LocalFoodDatabaseService: @unchecked Sendable {
         return results
     }
     
+    /// Exact barcode match in the bundled database.
+    func food(barcode: String) -> FoodItem? {
+        guard let db = db else { return nil }
+        let sql = """
+        SELECT id, barcode, name, brand, category, calories, protein, carbs, fat, fiber, sugar, saturated_fat, sodium, potassium, cholesterol, serving_options_json, origin
+        FROM foods WHERE barcode = ? LIMIT 1;
+        """
+        var statement: OpaquePointer? = nil
+        guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else { return nil }
+        defer { sqlite3_finalize(statement) }
+        sqlite3_bind_text(statement, 1, (barcode as NSString).utf8String, -1, nil)
+        guard sqlite3_step(statement) == SQLITE_ROW else { return nil }
+        return parseRow(statement)
+    }
+
     /// Default staples when search is empty
     func defaultStaples(limit: Int = 35) -> [FoodItem] {
         guard let db = db else {

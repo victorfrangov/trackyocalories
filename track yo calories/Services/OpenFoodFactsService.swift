@@ -24,29 +24,38 @@ actor OpenFoodFactsService {
         let cleanBarcode = barcode.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !cleanBarcode.isEmpty else { return nil }
         
+        // Production servers only (world.openfoodfacts.net is the password-protected staging server).
         let endpoints = [
-            "https://world.openfoodfacts.net/api/v2/product/\(cleanBarcode).json",
             "https://world.openfoodfacts.org/api/v2/product/\(cleanBarcode).json",
             "https://us.openfoodfacts.org/api/v0/product/\(cleanBarcode).json"
         ]
-        
+
+        var reachedServer = false
+        var lastError: Error = URLError(.cannotConnectToHost)
         for urlString in endpoints {
             guard let url = URL(string: urlString) else { continue }
             var request = URLRequest(url: url)
             request.setValue(userAgent, forHTTPHeaderField: "User-Agent")
             request.setValue("application/json", forHTTPHeaderField: "Accept")
-            
-            if let (data, response) = try? await session.data(for: request),
-               let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200,
-               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-               let status = json["status"] as? Int, status == 1,
-               let product = json["product"] as? [String: Any],
-               let parsed = parseProduct(product, fallbackBarcode: cleanBarcode) {
-                return parsed
+
+            do {
+                let (data, response) = try await session.data(for: request)
+                reachedServer = true
+                if let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200,
+                   let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                   let status = json["status"] as? Int, status == 1,
+                   let product = json["product"] as? [String: Any],
+                   let parsed = parseProduct(product, fallbackBarcode: cleanBarcode) {
+                    return parsed
+                }
+            } catch {
+                lastError = error
             }
         }
-        
-        return nil
+
+        // "Not found" only when a server actually answered; otherwise report the network problem.
+        if reachedServer { return nil }
+        throw lastError
     }
     
     /// Search products by keyword using modern OpenFoodFacts API
@@ -57,35 +66,31 @@ actor OpenFoodFactsService {
             return []
         }
         
-        let urlStrings = [
-            "https://world.openfoodfacts.net/api/v2/search?search_terms=\(encoded)&fields=code,product_name,product_name_en,brands,nutriments,serving_size,serving_quantity,image_front_small_url&page_size=25&page=\(page)",
-            "https://us.openfoodfacts.org/api/v2/search?search_terms=\(encoded)&fields=code,product_name,product_name_en,brands,nutriments,serving_size,serving_quantity,image_front_small_url&page_size=25&page=\(page)"
-        ]
-        
-        for urlString in urlStrings {
-            guard let url = URL(string: urlString) else { continue }
-            var request = URLRequest(url: url)
-            request.setValue(userAgent, forHTTPHeaderField: "User-Agent")
-            request.setValue("application/json", forHTTPHeaderField: "Accept")
-            
-            if let (data, response) = try? await session.data(for: request),
-               let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200,
-               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-               let products = json["products"] as? [[String: Any]] {
-                let parsedList = products.compactMap { parseProduct($0) }
-                if !parsedList.isEmpty {
-                    return parsedList
-                }
-            }
+        // The v2 /search endpoint ignores free-text `search_terms`; the classic search.pl does full-text search.
+        let fields = "code,product_name,product_name_en,brands,nutriments,serving_size,serving_quantity,image_front_small_url"
+        guard let url = URL(string: "https://world.openfoodfacts.org/cgi/search.pl?search_terms=\(encoded)&search_simple=1&action=process&json=1&page_size=25&page=\(page)&fields=\(fields)") else {
+            return []
         }
-        
-        return []
+        var request = URLRequest(url: url)
+        request.setValue(userAgent, forHTTPHeaderField: "User-Agent")
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+
+        let (data, response) = try await session.data(for: request)
+        guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
+            throw URLError(.badServerResponse)
+        }
+        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let products = json["products"] as? [[String: Any]] else {
+            return []
+        }
+        return products.compactMap { parseProduct($0) }
     }
     
     // MARK: - JSON Parser Helper
     private func parseProduct(_ dict: [String: Any], fallbackBarcode: String? = nil) -> FoodItem? {
-        let name = (dict["product_name"] as? String)?.trimmingCharacters(in: .whitespaces) ??
-                   (dict["product_name_en"] as? String)?.trimmingCharacters(in: .whitespaces) ?? ""
+        let name = [dict["product_name"], dict["product_name_en"]]
+            .compactMap { ($0 as? String)?.trimmingCharacters(in: .whitespaces) }
+            .first(where: { !$0.isEmpty }) ?? ""
         
         guard !name.isEmpty else { return nil }
         

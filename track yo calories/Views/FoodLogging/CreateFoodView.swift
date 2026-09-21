@@ -275,14 +275,14 @@ struct CreateFoodView: View {
     }
     
     private func saveCustomFood() {
-        let servGrams = Double(servingGramsText) ?? 100.0
-        let cal = Double(caloriesText) ?? 0.0
-        let pro = Double(proteinText) ?? 0.0
-        let carb = Double(carbsText) ?? 0.0
-        let fat = Double(fatText) ?? 0.0
-        let fib = Double(fiberText)
-        let sug = Double(sugarText)
-        let sod = Double(sodiumText)
+        let servGrams = Double(userInput: servingGramsText) ?? 100.0
+        let cal = Double(userInput: caloriesText) ?? 0.0
+        let pro = Double(userInput: proteinText) ?? 0.0
+        let carb = Double(userInput: carbsText) ?? 0.0
+        let fat = Double(userInput: fatText) ?? 0.0
+        let fib = Double(userInput: fiberText)
+        let sug = Double(userInput: sugarText)
+        let sod = Double(userInput: sodiumText)
         
         let factor = 100.0 / max(1.0, servGrams)
         let nutrients100g = NutrientInfo(
@@ -327,8 +327,8 @@ struct CreateFoodView: View {
             createdAt: Date()
         )
         
+        // Recipes are listed from `dataStore.recipes`; also adding a custom-food copy made every recipe appear twice.
         dataStore.addRecipe(recipe)
-        dataStore.addCustomFood(recipe.toFoodItem())
         dismiss()
     }
 }
@@ -637,7 +637,8 @@ struct IngredientPickerSheet: View {
                                             
                                             let def = food.defaultServing
                                             let cals = Int((food.nutrientsPer100g.calories * def.gramWeight / 100.0).rounded())
-                                            Text("\(def.name) • \(cals) kcal • P:\(Int(food.nutrientsPer100g.protein))g C:\(Int(food.nutrientsPer100g.carbs))g F:\(Int(food.nutrientsPer100g.fat))g")
+                                            let perServing = food.nutrients(for: def, quantity: 1)
+                                            Text("\(def.name) • \(cals) kcal • P:\(Int(perServing.protein))g C:\(Int(perServing.carbs))g F:\(Int(perServing.fat))g")
                                                 .font(.system(size: 12))
                                                 .foregroundColor(.secondary)
                                         }

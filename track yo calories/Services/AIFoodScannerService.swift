@@ -102,7 +102,7 @@ struct AIFoodItemEstimate: Identifiable, Codable, Sendable {
                 ServingOption(id: UUID(), name: "1g", gramWeight: 1.0, isDefault: false)
             ],
             isCustom: true,
-            isVerified: true
+            isVerified: false
         )
     }
 }
@@ -236,7 +236,7 @@ struct AIFoodEstimate: Identifiable, Codable, Sendable {
                 ServingOption(id: UUID(), name: "1g", gramWeight: 1.0, isDefault: false)
             ],
             isCustom: true,
-            isVerified: true
+            isVerified: false
         )
     }
 }
@@ -246,9 +246,12 @@ enum AIScannerError: LocalizedError {
     case imageCompressionFailed
     case invalidResponse
     case apiError(String)
-    
+    case modelUnavailable(String)
+
     var errorDescription: String? {
         switch self {
+        case .modelUnavailable:
+            return "Google’s AI service is unavailable right now. Please try again in a moment."
         case .missingApiKey:
             return "Please enter your free Google AI Studio Gemini API key in Profile settings."
         case .imageCompressionFailed:
@@ -282,41 +285,47 @@ actor AIFoodScannerService {
             throw AIScannerError.missingApiKey
         }
         
-        let candidateModels = [
-            preferredModel,
-            "gemini-3.5-flash-lite",
-            "gemini-3.5-flash",
-            "gemini-3.7-flash",
-            "gemini-flash-latest-high-res-exp",
-            "gemini-2.0-flash",
-            "gemini-1.5-flash"
-        ]
-        
+        return try await withModelFallback(primary: "gemini-3.5-flash-lite") { model in
+            try await self.executeGeminiTextRequest(model: model, description: text, apiKey: cleanKey)
+        }
+    }
+
+    /// Tries the last model that worked, then the fallbacks. Only moves on to another model when
+    /// the current one is unavailable (404 / 5xx / network); real errors such as an invalid key,
+    /// rate limits or a bad request are reported straight away instead of spinning through every model.
+    private func withModelFallback(
+        primary: String,
+        _ run: (String) async throws -> AIFoodEstimate
+    ) async throws -> AIFoodEstimate {
+        var candidates: [String] = []
+        for model in [preferredModel, primary, "gemini-3.5-flash-lite", "gemini-3.5-flash", "gemini-3.7-flash", "gemini-flash-latest"]
+        where !candidates.contains(model) {
+            candidates.append(model)
+        }
+
         var lastError: Error = AIScannerError.invalidResponse
-        
-        for model in candidateModels {
+        for model in candidates {
+            try Task.checkCancellation()
             do {
-                let result = try await executeGeminiTextRequest(model: model, description: text, apiKey: cleanKey)
-                self.preferredModel = model
+                let result = try await run(model)
+                preferredModel = model
                 return result
-            } catch {
+            } catch let error as AIScannerError {
+                guard case .modelUnavailable = error else { throw error }
                 lastError = error
-                if let apiErr = error as? AIScannerError, case .apiError(let msg) = apiErr {
-                    if msg.contains("API key is invalid") || msg.contains("Rate limit") {
-                        throw error
-                    }
-                }
-                continue
+            } catch is URLError {
+                lastError = AIScannerError.apiError("Couldn’t reach Google AI. Check your internet connection and try again.")
+            } catch is DecodingError {
+                lastError = AIScannerError.invalidResponse
             }
         }
-        
         throw lastError
     }
     
     private func executeGeminiTextRequest(model: String, description: String, apiKey: String) async throws -> AIFoodEstimate {
         let cleanModel = model.hasPrefix("models/") ? String(model.dropFirst(7)) : model
         
-        guard let url = URL(string: "https://generativelanguage.googleapis.com/v1beta/models/\(cleanModel):generateContent?key=\(apiKey)") else {
+        guard let url = URL(string: "https://generativelanguage.googleapis.com/v1beta/models/\(cleanModel):generateContent") else {
             throw AIScannerError.apiError("Invalid API endpoint URL")
         }
         
@@ -365,6 +374,7 @@ actor AIFoodScannerService {
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue(apiKey, forHTTPHeaderField: "x-goog-api-key")
         request.httpBody = try JSONSerialization.data(withJSONObject: requestPayload)
         
         let (data, response) = try await session.data(for: request)
@@ -384,41 +394,15 @@ actor AIFoodScannerService {
         }
         let base64String = jpegData.base64EncodedString()
         
-        let candidateModels = [
-            preferredModel,
-            "gemini-3.5-flash",
-            "gemini-3.5-flash-lite",
-            "gemini-3.7-flash",
-            "gemini-flash-latest-high-res-exp",
-            "gemini-2.0-flash",
-            "gemini-1.5-flash"
-        ]
-        
-        var lastError: Error = AIScannerError.invalidResponse
-        
-        for model in candidateModels {
-            do {
-                let result = try await executeGeminiVisionRequest(model: model, base64Image: base64String, apiKey: cleanKey)
-                self.preferredModel = model
-                return result
-            } catch {
-                lastError = error
-                if let apiErr = error as? AIScannerError, case .apiError(let msg) = apiErr {
-                    if msg.contains("API key is invalid") || msg.contains("Rate limit") {
-                        throw error
-                    }
-                }
-                continue
-            }
+        return try await withModelFallback(primary: "gemini-3.5-flash") { model in
+            try await self.executeGeminiVisionRequest(model: model, base64Image: base64String, apiKey: cleanKey)
         }
-        
-        throw lastError
     }
     
     private func executeGeminiVisionRequest(model: String, base64Image: String, apiKey: String) async throws -> AIFoodEstimate {
         let cleanModel = model.hasPrefix("models/") ? String(model.dropFirst(7)) : model
         
-        guard let url = URL(string: "https://generativelanguage.googleapis.com/v1beta/models/\(cleanModel):generateContent?key=\(apiKey)") else {
+        guard let url = URL(string: "https://generativelanguage.googleapis.com/v1beta/models/\(cleanModel):generateContent") else {
             throw AIScannerError.apiError("Invalid API endpoint URL")
         }
         
@@ -473,6 +457,7 @@ actor AIFoodScannerService {
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue(apiKey, forHTTPHeaderField: "x-goog-api-key")
         request.httpBody = try JSONSerialization.data(withJSONObject: requestPayload)
         
         let (data, response) = try await session.data(for: request)
@@ -493,6 +478,11 @@ actor AIFoodScannerService {
         
         if httpResponse.statusCode == 429 {
             throw AIScannerError.apiError("Rate limit reached. Please wait a moment and try again.")
+        }
+
+        // Model retired/renamed, or a temporary server problem: let the caller try another model.
+        if httpResponse.statusCode == 404 || httpResponse.statusCode >= 500 {
+            throw AIScannerError.modelUnavailable(cleanModel)
         }
         
         guard httpResponse.statusCode == 200 else {
