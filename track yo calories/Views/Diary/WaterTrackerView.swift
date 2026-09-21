@@ -8,154 +8,127 @@ import SwiftUI
 struct WaterTrackerView: View {
     @ObservedObject var dataStore: DataStore
     @State private var showCustomWaterSheet: Bool = false
-    @State private var customAmountText: String = ""
-    
-    var currentWaterMl: Double {
-        dataStore.waterIntake(for: dataStore.selectedDate)
-    }
-    
-    var goalMl: Double {
-        dataStore.userProfile.waterGoalMl
-    }
-    
-    var progress: Double {
+
+    private var date: Date { dataStore.selectedDate }
+    private var unitSystem: UnitSystem { dataStore.userProfile.unitSystem }
+    private var currentMl: Double { dataStore.waterIntake(for: date) }
+    private var goalMl: Double { dataStore.userProfile.waterGoalMl }
+
+    private var progress: Double {
         guard goalMl > 0 else { return 0 }
-        return min(1.0, currentWaterMl / goalMl)
+        return min(1.0, currentMl / goalMl)
     }
-    
-    var unitSystem: UnitSystem {
-        dataStore.userProfile.unitSystem
+
+    private func display(_ ml: Double) -> String {
+        let value = unitSystem.mlToDisplay(ml)
+        return unitSystem == .metric ? "\(value.roundedString) ml" : "\(value.cleanString) fl oz"
     }
-    
-    var displayCurrent: String {
-        let val = unitSystem.mlToDisplay(currentWaterMl)
-        return unitSystem == .metric ? "\(Int(val)) ml" : String(format: "%.1f fl oz", val)
-    }
-    
-    var displayGoal: String {
-        let val = unitSystem.mlToDisplay(goalMl)
-        return unitSystem == .metric ? "\(Int(val)) ml" : String(format: "%.1f fl oz", val)
-    }
-    
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
+        VStack(alignment: .leading, spacing: 12) {
             HStack {
-                HStack(spacing: 8) {
-                    Image(systemName: "drop.fill")
-                        .font(.system(size: 18))
-                        .foregroundColor(.blue)
-                    
-                    Text("Hydration")
-                        .font(.system(size: 17, weight: .bold, design: .rounded))
+                Label {
+                    Text(display(currentMl))
+                        .font(.body.weight(.semibold).monospacedDigit())
+                    + Text(" of \(display(goalMl))")
+                        .foregroundStyle(.secondary)
+                } icon: {
+                    Image(systemName: "drop.fill").foregroundStyle(.blue)
                 }
-                
                 Spacer()
-                
-                Text("\(displayCurrent) / \(displayGoal)")
-                    .font(.system(size: 14, weight: .semibold, design: .rounded))
-                    .foregroundColor(.secondary)
             }
-            
-            // Progress Bar
-            GeometryReader { geo in
-                ZStack(alignment: .leading) {
-                    Capsule()
-                        .fill(Color.blue.opacity(0.15))
-                        .frame(height: 10)
-                    
-                    Capsule()
-                        .fill(
-                            LinearGradient(
-                                colors: [Color.cyan, Color.blue],
-                                startPoint: .leading,
-                                endPoint: .trailing
-                            )
-                        )
-                        .frame(width: geo.size.width * CGFloat(progress), height: 10)
-                        .animation(.spring(response: 0.5, dampingFraction: 0.8), value: progress)
+            .accessibilityElement(children: .combine)
+
+            ProgressView(value: progress)
+                .tint(.blue)
+
+            HStack(spacing: 8) {
+                Button {
+                    withAnimation { dataStore.removeLastWater(on: date) }
+                } label: {
+                    Image(systemName: "minus")
+                        .frame(width: 28)
                 }
-            }
-            .frame(height: 10)
-            
-            // Quick Add Buttons
-            HStack(spacing: 10) {
-                Button(action: { logWater(ml: 250) }) {
-                    HStack(spacing: 4) {
-                        Image(systemName: "plus")
-                            .font(.system(size: 11, weight: .bold))
-                        Text(unitSystem == .metric ? "250 ml" : "8.5 oz")
-                            .font(.system(size: 13, weight: .semibold))
-                    }
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 8)
-                    .background(Color.blue.opacity(0.12))
-                    .foregroundColor(.blue)
-                    .cornerRadius(8)
-                }
-                
-                Button(action: { logWater(ml: 500) }) {
-                    HStack(spacing: 4) {
-                        Image(systemName: "plus")
-                            .font(.system(size: 11, weight: .bold))
-                        Text(unitSystem == .metric ? "500 ml" : "17 oz")
-                            .font(.system(size: 13, weight: .semibold))
-                    }
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 8)
-                    .background(Color.blue.opacity(0.12))
-                    .foregroundColor(.blue)
-                    .cornerRadius(8)
-                }
-                
-                Button(action: { showCustomWaterSheet = true }) {
-                    HStack(spacing: 4) {
-                        Image(systemName: "plus.circle")
-                            .font(.system(size: 12, weight: .bold))
-                        Text("Custom")
-                            .font(.system(size: 13, weight: .semibold))
-                    }
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 8)
-                    .background(Color(.systemGray5))
-                    .foregroundColor(.primary)
-                    .cornerRadius(8)
+                .disabled(currentMl <= 0)
+                .accessibilityLabel("Remove last water entry")
+
+                quickAddButton(ml: 250, imperialLabel: "8 oz")
+                quickAddButton(ml: 500, imperialLabel: "16 oz")
+
+                Button {
+                    showCustomWaterSheet = true
+                } label: {
+                    Text("Other…")
+                        .frame(maxWidth: .infinity)
                 }
             }
+            .buttonStyle(.bordered)
+            .tint(.blue)
         }
-        .padding(16)
-        .background(Color(.secondarySystemGroupedBackground))
-        .cornerRadius(16)
+        .padding(.vertical, 4)
         .sheet(isPresented: $showCustomWaterSheet) {
-            NavigationStack {
-                Form {
-                    Section("Log Water Amount (\(unitSystem.liquidUnit))") {
-                        TextField(unitSystem == .metric ? "Amount in ml (e.g. 350)" : "Amount in fl oz (e.g. 12)", text: $customAmountText)
-                            .keyboardType(.decimalPad)
-                    }
-                }
-                .navigationTitle("Log Water")
-                .navigationBarTitleDisplayMode(.inline)
-                .toolbar {
-                    ToolbarItem(placement: .cancellationAction) {
-                        Button("Cancel") { showCustomWaterSheet = false }
-                    }
-                    ToolbarItem(placement: .confirmationAction) {
-                        Button("Add") {
-                            if let val = Double(customAmountText), val > 0 {
-                                let ml = unitSystem.displayToMl(val)
-                                logWater(ml: ml)
-                            }
-                            customAmountText = ""
-                            showCustomWaterSheet = false
-                        }
-                    }
-                }
+            CustomWaterSheet(unitSystem: unitSystem) { ml in
+                dataStore.logWater(amountMl: ml, date: date)
             }
-            .presentationDetents([.fraction(0.35)])
         }
     }
-    
-    private func logWater(ml: Double) {
-        dataStore.logWater(amountMl: ml, date: dataStore.selectedDate)
+
+    private func quickAddButton(ml: Double, imperialLabel: String) -> some View {
+        // Imperial buttons log round fluid-ounce amounts rather than odd conversions of 250/500 ml.
+        let amount = unitSystem == .metric ? ml : unitSystem.displayToMl(ml == 250 ? 8 : 16)
+        return Button {
+            withAnimation { dataStore.logWater(amountMl: amount, date: date) }
+            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        } label: {
+            Text("+\(unitSystem == .metric ? "\(Int(ml)) ml" : imperialLabel)")
+                .frame(maxWidth: .infinity)
+                .lineLimit(1)
+        }
+    }
+}
+
+private struct CustomWaterSheet: View {
+    let unitSystem: UnitSystem
+    var onAdd: (Double) -> Void
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var amountText: String = ""
+    @FocusState private var focused: Bool
+
+    private var amount: Double? {
+        guard let v = Double(userInput: amountText), v > 0 else { return nil }
+        return v
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    HStack {
+                        TextField("Amount", text: $amountText)
+                            .keyboardType(.decimalPad)
+                            .focused($focused)
+                        Text(unitSystem.liquidUnit)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+            .navigationTitle("Add Water")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Add") {
+                        if let amount { onAdd(unitSystem.displayToMl(amount)) }
+                        dismiss()
+                    }
+                    .disabled(amount == nil)
+                }
+            }
+            .onAppear { focused = true }
+        }
+        .presentationDetents([.height(220)])
     }
 }

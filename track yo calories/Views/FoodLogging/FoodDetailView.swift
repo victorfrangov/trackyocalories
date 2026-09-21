@@ -8,23 +8,23 @@ import SwiftUI
 struct FoodDetailView: View {
     let food: FoodItem
     @ObservedObject var dataStore: DataStore
-    
-    @State var targetMeal: MealType
-    @State var targetDate: Date
-    @State var selectedServing: ServingOption
-    @State var quantity: Double
-    
+
     var isEditingExisting: Bool = false
     var existingEntryId: UUID? = nil
     var onLogged: (() -> Void)? = nil
-    
+
     @Environment(\.dismiss) private var dismiss
-    
-    @State private var quantityText: String = "1"
-    @State private var calorieInputText: String = ""
-    @State private var showCalorieEditModal: Bool = false
-    @State private var isEditingCaloriesInline: Bool = false
-    
+
+    @State private var targetMeal: MealType
+    @State private var targetDate: Date
+    @State private var servingOptions: [ServingOption]
+    @State private var selectedServing: ServingOption
+    @State private var quantity: Double
+    @State private var quantityText: String
+    @State private var showCalorieEditor: Bool = false
+    @State private var showDeleteConfirm: Bool = false
+    @FocusState private var quantityFocused: Bool
+
     init(
         food: FoodItem,
         dataStore: DataStore,
@@ -38,408 +38,301 @@ struct FoodDetailView: View {
     ) {
         self.food = food
         self.dataStore = dataStore
-        self._targetMeal = State(initialValue: targetMeal)
-        self._targetDate = State(initialValue: targetDate)
-        let serving = initialServing ?? food.defaultServing
-        self._selectedServing = State(initialValue: serving)
-        self._quantity = State(initialValue: initialQuantity)
-        self._quantityText = State(initialValue: initialQuantity == floor(initialQuantity) ? "\(Int(initialQuantity))" : String(format: "%.2f", initialQuantity))
         self.isEditingExisting = isEditingExisting
         self.existingEntryId = existingEntryId
         self.onLogged = onLogged
+
+        // Build the option list once so picker tags stay stable (effectiveServingOptions
+        // creates fresh ids on every call when a food has no stored servings).
+        var options = food.effectiveServingOptions
+        if let initialServing, !options.contains(initialServing) {
+            options.insert(initialServing, at: 0)
+        }
+        if !options.contains(where: { $0.gramWeight == 1 }) {
+            options.append(ServingOption(name: "g", gramWeight: 1, isDefault: false))
+        }
+        let serving = initialServing ?? options.first(where: { $0.isDefault }) ?? options[0]
+
+        self._targetMeal = State(initialValue: targetMeal)
+        self._targetDate = State(initialValue: targetDate)
+        self._servingOptions = State(initialValue: options)
+        self._selectedServing = State(initialValue: serving)
+        self._quantity = State(initialValue: initialQuantity)
+        self._quantityText = State(initialValue: initialQuantity.cleanString)
     }
-    
-    var totalGrams: Double {
-        selectedServing.gramWeight * quantity
-    }
-    
-    var currentNutrients: NutrientInfo {
-        food.nutrients(for: selectedServing, quantity: quantity)
-    }
-    
-    var isFav: Bool {
-        dataStore.isFavorite(food)
-    }
-    
+
+    private var isGramServing: Bool { selectedServing.gramWeight == 1 }
+    private var totalGrams: Double { selectedServing.gramWeight * quantity }
+    private var nutrients: NutrientInfo { food.nutrients(for: selectedServing, quantity: quantity) }
+    private var isValid: Bool { quantity > 0 }
+
     var body: some View {
         NavigationStack {
-            ScrollView {
-                VStack(spacing: 18) {
-                    // Food Header Card
-                    VStack(alignment: .leading, spacing: 6) {
-                        HStack(alignment: .top) {
-                            VStack(alignment: .leading, spacing: 3) {
-                                Text(food.name)
-                                    .font(.system(size: 22, weight: .bold, design: .rounded))
-                                    .foregroundColor(.primary)
-                                
-                                if let brand = food.brand, !brand.isEmpty {
-                                    Text(brand)
-                                        .font(.system(size: 14, weight: .medium))
-                                        .foregroundColor(.secondary)
-                                }
-                            }
-                            
-                            Spacer()
-                            
-                            Button(action: {
-                                withAnimation {
-                                    dataStore.toggleFavorite(food)
-                                }
-                            }) {
-                                Image(systemName: isFav ? "star.fill" : "star")
-                                    .font(.system(size: 22))
-                                    .foregroundColor(isFav ? .yellow : .secondary)
-                            }
+            Form {
+                headerSection
+                amountSection
+
+                Section {
+                    Picker("Meal", selection: $targetMeal) {
+                        ForEach(MealType.allCases) { meal in
+                            Text(meal.displayName).tag(meal)
                         }
                     }
-                    .padding(16)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(Color(.secondarySystemGroupedBackground))
-                    .cornerRadius(18)
-                    .padding(.horizontal)
-                    
-                    // Interactive Nutrition Card (Tap calories to change & auto-scale macros)
-                    VStack(spacing: 16) {
-                        // Interactive Calories Header
-                        Button(action: { showCalorieEditModal = true }) {
-                            HStack(alignment: .center) {
-                                VStack(alignment: .leading, spacing: 2) {
-                                    HStack(spacing: 6) {
-                                        Text("\(Int(currentNutrients.calories))")
-                                            .font(.system(size: 40, weight: .bold, design: .rounded))
-                                            .foregroundColor(.primary)
-                                        
-                                        Image(systemName: "pencil.circle.fill")
-                                            .font(.system(size: 18))
-                                            .foregroundColor(.orange)
-                                    }
-                                    
-                                    Text("CALORIES • TAP TO EDIT")
-                                        .font(.system(size: 11, weight: .bold))
-                                        .foregroundColor(.orange)
-                                        .tracking(1)
-                                }
-                                
-                                Spacer()
-                                
-                                VStack(alignment: .trailing, spacing: 2) {
-                                    Text("\(Int(totalGrams)) g")
-                                        .font(.system(size: 18, weight: .bold, design: .rounded))
-                                        .foregroundColor(.primary)
-                                    
-                                    Text("portion")
-                                        .font(.system(size: 12))
-                                        .foregroundColor(.secondary)
-                                }
-                            }
+                    DatePicker("Date", selection: $targetDate, displayedComponents: .date)
+                }
+
+                nutritionSection
+
+                if isEditingExisting {
+                    Section {
+                        Button("Delete Entry", role: .destructive) {
+                            showDeleteConfirm = true
                         }
-                        .buttonStyle(.plain)
-                        
-                        // Quick Calorie Adjust Stepper Row
-                        HStack(spacing: 8) {
-                            CalorieQuickButton(label: "-50", delta: -50, onApply: applyCalorieDelta)
-                            CalorieQuickButton(label: "-10", delta: -10, onApply: applyCalorieDelta)
-                            CalorieQuickButton(label: "+10", delta: 10, onApply: applyCalorieDelta)
-                            CalorieQuickButton(label: "+50", delta: 50, onApply: applyCalorieDelta)
-                        }
-                        
-                        Divider()
-                        
-                        // 3 Macro Badges (Auto-scaling with calories)
-                        HStack(spacing: 10) {
-                            MacroCard(name: "Protein", grams: currentNutrients.protein, color: .orange)
-                            MacroCard(name: "Carbs", grams: currentNutrients.carbs, color: .blue)
-                            MacroCard(name: "Fat", grams: currentNutrients.fat, color: .purple)
-                        }
-                    }
-                    .padding(18)
-                    .background(Color(.secondarySystemGroupedBackground))
-                    .cornerRadius(20)
-                    .padding(.horizontal)
-                    
-                    // Portion & Serving Controls
-                    VStack(spacing: 16) {
-                        // Serving Size Unit Picker
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text("Serving Unit")
-                                .font(.system(size: 14, weight: .semibold))
-                                .foregroundColor(.secondary)
-                            
-                            Picker("Serving Unit", selection: $selectedServing) {
-                                ForEach(food.effectiveServingOptions) { option in
-                                    Text("\(option.name) (\(Int(option.gramWeight))g)").tag(option)
-                                }
-                            }
-                            .pickerStyle(.menu)
-                            .padding(.horizontal, 14)
-                            .padding(.vertical, 10)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .background(Color(.systemGray6))
-                            .cornerRadius(12)
-                            .onChange(of: selectedServing) { _, _ in
-                                syncQuantityText()
-                            }
-                        }
-                        
-                        // Number of Servings / Quantity Stepper
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text("Number of Servings")
-                                .font(.system(size: 14, weight: .semibold))
-                                .foregroundColor(.secondary)
-                            
-                            HStack(spacing: 12) {
-                                Button(action: { adjustQuantity(by: -0.25) }) {
-                                    Image(systemName: "minus")
-                                        .font(.system(size: 16, weight: .bold))
-                                        .frame(width: 44, height: 44)
-                                        .background(Color(.systemGray6))
-                                        .cornerRadius(12)
-                                }
-                                
-                                TextField("Quantity", text: $quantityText)
-                                    .keyboardType(.decimalPad)
-                                    .multilineTextAlignment(.center)
-                                    .font(.system(size: 20, weight: .bold, design: .rounded))
-                                    .padding(.vertical, 10)
-                                    .background(Color(.systemGray6))
-                                    .cornerRadius(12)
-                                    .onChange(of: quantityText) { _, newValue in
-                                        if let val = Double(newValue), val > 0 {
-                                            quantity = val
-                                        }
-                                    }
-                                
-                                Button(action: { adjustQuantity(by: 0.25) }) {
-                                    Image(systemName: "plus")
-                                        .font(.system(size: 16, weight: .bold))
-                                        .frame(width: 44, height: 44)
-                                        .background(Color(.systemGray6))
-                                        .cornerRadius(12)
-                                }
-                            }
-                        }
-                        
-                        // Meal Selector
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text("Meal")
-                                .font(.system(size: 14, weight: .semibold))
-                                .foregroundColor(.secondary)
-                            
-                            Picker("Meal", selection: $targetMeal) {
-                                ForEach(MealType.allCases) { meal in
-                                    Text(meal.displayName).tag(meal)
-                                }
-                            }
-                            .pickerStyle(.segmented)
-                        }
-                    }
-                    .padding(18)
-                    .background(Color(.secondarySystemGroupedBackground))
-                    .cornerRadius(20)
-                    .padding(.horizontal)
-                    
-                    // Detailed Micronutrients List
-                    VStack(alignment: .leading, spacing: 10) {
-                        Text("Detailed Micronutrients")
-                            .font(.system(size: 14, weight: .bold))
-                            .foregroundColor(.secondary)
-                        
-                        NutrientRow(label: "Fiber", value: currentNutrients.fiber.map { String(format: "%.1f g", $0) } ?? "-")
-                        NutrientRow(label: "Sugar", value: currentNutrients.sugar.map { String(format: "%.1f g", $0) } ?? "-")
-                        NutrientRow(label: "Saturated Fat", value: currentNutrients.saturatedFat.map { String(format: "%.1f g", $0) } ?? "-")
-                        NutrientRow(label: "Sodium", value: currentNutrients.sodium.map { "\(Int($0)) mg" } ?? "-")
-                        NutrientRow(label: "Potassium", value: currentNutrients.potassium.map { "\(Int($0)) mg" } ?? "-")
-                        NutrientRow(label: "Cholesterol", value: currentNutrients.cholesterol.map { "\(Int($0)) mg" } ?? "-")
-                    }
-                    .padding(18)
-                    .background(Color(.secondarySystemGroupedBackground))
-                    .cornerRadius(20)
-                    .padding(.horizontal)
-                    
-                    // Action Buttons
-                    Button(action: logOrUpdateFood) {
-                        Text(isEditingExisting ? "Update Entry (\(Int(currentNutrients.calories)) kcal)" : "Log Food (\(Int(currentNutrients.calories)) kcal)")
-                            .font(.system(size: 17, weight: .bold))
-                            .foregroundColor(.white)
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 15)
-                            .background(Color.accentColor)
-                            .cornerRadius(16)
-                    }
-                    .padding(.horizontal)
-                    
-                    if isEditingExisting, let id = existingEntryId {
-                        Button(role: .destructive, action: {
-                            dataStore.deleteEntry(id: id)
-                            dismiss()
-                        }) {
-                            Text("Delete Entry")
-                                .font(.system(size: 15, weight: .semibold))
-                                .foregroundColor(.red)
-                        }
-                        .padding(.top, 4)
+                        .frame(maxWidth: .infinity)
                     }
                 }
-                .padding(.vertical, 16)
             }
-            .background(Color(.systemGroupedBackground))
             .navigationTitle(isEditingExisting ? "Edit Entry" : "Add Food")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { dismiss() }
                 }
-            }
-            .sheet(isPresented: $showCalorieEditModal) {
-                CalorieDirectEditSheet(
-                    currentCalories: currentNutrients.calories,
-                    onSaveCalories: { targetCals in
-                        applyExactCalories(targetCals)
+                ToolbarItem(placement: .primaryAction) {
+                    Button {
+                        dataStore.toggleFavorite(food)
+                    } label: {
+                        Label("Favorite", systemImage: dataStore.isFavorite(food) ? "heart.fill" : "heart")
                     }
-                )
+                    .tint(.pink)
+                }
+                ToolbarItemGroup(placement: .keyboard) {
+                    Spacer()
+                    Button("Done") { quantityFocused = false }
+                }
+            }
+            .safeAreaInset(edge: .bottom) {
+                Button(action: save) {
+                    Text(isEditingExisting
+                         ? "Save · \(nutrients.calories.roundedString) kcal"
+                         : "Add to \(targetMeal.displayName) · \(nutrients.calories.roundedString) kcal")
+                        .font(.headline)
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.large)
+                .disabled(!isValid)
+                .padding(.horizontal)
+                .padding(.bottom, 8)
+                .background(.bar)
+            }
+            .sheet(isPresented: $showCalorieEditor) {
+                CalorieDirectEditSheet(currentCalories: nutrients.calories) { target in
+                    applyExactCalories(target)
+                }
+            }
+            .confirmationDialog("Delete this entry?", isPresented: $showDeleteConfirm, titleVisibility: .visible) {
+                Button("Delete Entry", role: .destructive) {
+                    if let id = existingEntryId { dataStore.deleteEntry(id: id) }
+                    dismiss()
+                }
             }
         }
     }
-    
-    // MARK: - Auto-scaling Calculations
-    private func applyExactCalories(_ targetCalories: Double) {
-        let singleServingCalories = food.nutrients(for: selectedServing, quantity: 1.0).calories
-        guard singleServingCalories > 0 else { return }
-        
-        let newQty = max(0.05, targetCalories / singleServingCalories)
-        self.quantity = newQty
-        syncQuantityText()
-    }
-    
-    private func applyCalorieDelta(_ delta: Double) {
-        let targetCalories = max(10, currentNutrients.calories + delta)
-        applyExactCalories(targetCalories)
-    }
-    
-    private func adjustQuantity(by delta: Double) {
-        let newQ = max(0.25, quantity + delta)
-        quantity = newQ
-        syncQuantityText()
-    }
-    
-    private func syncQuantityText() {
-        quantityText = quantity == floor(quantity) ? "\(Int(quantity))" : String(format: "%.2f", quantity)
-    }
-    
-    private func logOrUpdateFood() {
-        if isEditingExisting, let id = existingEntryId {
-            dataStore.deleteEntry(id: id)
+
+    // MARK: - Sections
+    private var headerSection: some View {
+        Section {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(food.name)
+                    .font(.title3.weight(.semibold))
+                if let brand = food.brand, !brand.isEmpty {
+                    Text(brand)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .padding(.vertical, 2)
+
+            HStack(spacing: 0) {
+                summaryColumn(value: nutrients.calories.roundedString, label: "kcal", color: .primary)
+                summaryColumn(value: nutrients.protein.cleanString(max: 1), label: "Protein", color: .orange)
+                summaryColumn(value: nutrients.carbs.cleanString(max: 1), label: "Carbs", color: .blue)
+                summaryColumn(value: nutrients.fat.cleanString(max: 1), label: "Fat", color: .purple)
+            }
+            .padding(.vertical, 4)
         }
-        
-        dataStore.logFood(
-            food: food,
-            mealType: targetMeal,
-            serving: selectedServing,
-            quantity: quantity,
-            date: targetDate
-        )
-        
+    }
+
+    private func summaryColumn(value: String, label: String, color: Color) -> some View {
+        VStack(spacing: 2) {
+            Text(value)
+                .font(.title3.weight(.bold).monospacedDigit())
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+            Text(label)
+                .font(.caption)
+                .foregroundStyle(color == .primary ? Color.secondary : color)
+        }
+        .frame(maxWidth: .infinity)
+        .accessibilityElement(children: .combine)
+    }
+
+    private var amountSection: some View {
+        Section {
+            Picker("Unit", selection: $selectedServing) {
+                ForEach(servingOptions) { option in
+                    Text(servingLabel(option)).tag(option)
+                }
+            }
+            .onChange(of: selectedServing) { oldValue, newValue in
+                convertQuantity(from: oldValue, to: newValue)
+            }
+
+            HStack {
+                Text(isGramServing ? "Grams" : "Servings")
+                Spacer()
+                TextField("Amount", text: $quantityText)
+                    .keyboardType(.decimalPad)
+                    .multilineTextAlignment(.trailing)
+                    .font(.body.monospacedDigit())
+                    .frame(maxWidth: 90)
+                    .focused($quantityFocused)
+                    .onChange(of: quantityText) { _, newValue in
+                        if let value = Double(userInput: newValue), value >= 0 {
+                            quantity = value
+                        }
+                    }
+                Stepper("Amount", value: Binding(
+                    get: { quantity },
+                    set: { newValue in
+                        quantity = max(stepSize, newValue)
+                        quantityText = quantity.cleanString
+                    }
+                ), in: 0...10_000, step: stepSize)
+                .labelsHidden()
+            }
+
+            Button {
+                showCalorieEditor = true
+            } label: {
+                Label("Set Amount by Calories", systemImage: "flame")
+            }
+        } header: {
+            Text("Amount")
+        } footer: {
+            if !isGramServing {
+                Text("Total: \(totalGrams.roundedString) g")
+            }
+        }
+    }
+
+    private var nutritionSection: some View {
+        Section("Nutrition for This Amount") {
+            NutrientRow(label: "Protein", value: "\(nutrients.protein.cleanString(max: 1)) g")
+            NutrientRow(label: "Carbohydrates", value: "\(nutrients.carbs.cleanString(max: 1)) g")
+            NutrientRow(label: "Fiber", value: nutrients.fiber.map { "\($0.cleanString(max: 1)) g" } ?? "–", indent: true)
+            NutrientRow(label: "Sugar", value: nutrients.sugar.map { "\($0.cleanString(max: 1)) g" } ?? "–", indent: true)
+            NutrientRow(label: "Fat", value: "\(nutrients.fat.cleanString(max: 1)) g")
+            NutrientRow(label: "Saturated Fat", value: nutrients.saturatedFat.map { "\($0.cleanString(max: 1)) g" } ?? "–", indent: true)
+            NutrientRow(label: "Sodium", value: nutrients.sodium.map { "\($0.roundedString) mg" } ?? "–")
+            NutrientRow(label: "Potassium", value: nutrients.potassium.map { "\($0.roundedString) mg" } ?? "–")
+            NutrientRow(label: "Cholesterol", value: nutrients.cholesterol.map { "\($0.roundedString) mg" } ?? "–")
+        }
+    }
+
+    // MARK: - Helpers
+    private var stepSize: Double {
+        if isGramServing { return 10 }
+        return selectedServing.gramWeight >= 100 && selectedServing.name.lowercased().contains("100") ? 0.25 : 0.5
+    }
+
+    private func servingLabel(_ option: ServingOption) -> String {
+        if option.gramWeight == 1 { return "grams" }
+        // Avoid "100g (100g)" when the name already states the weight.
+        let grams = "\(option.gramWeight.roundedString)g"
+        return option.name.replacingOccurrences(of: " ", with: "").contains(grams) ? option.name : "\(option.name) (\(grams))"
+    }
+
+    /// Keeps the same total weight when switching units (e.g. 1 × 100 g → 100 grams).
+    private func convertQuantity(from old: ServingOption, to new: ServingOption) {
+        guard old.gramWeight > 0, new.gramWeight > 0, old != new else { return }
+        let grams = old.gramWeight * quantity
+        var converted = grams / new.gramWeight
+        converted = new.gramWeight == 1 ? converted.rounded() : (converted * 4).rounded() / 4
+        quantity = max(new.gramWeight == 1 ? 1 : 0.25, converted)
+        quantityText = quantity.cleanString
+    }
+
+    private func applyExactCalories(_ targetCalories: Double) {
+        let perServing = food.nutrients(for: selectedServing, quantity: 1).calories
+        guard perServing > 0, targetCalories > 0 else { return }
+        quantity = targetCalories / perServing
+        quantityText = quantity.cleanString
+    }
+
+    private func save() {
+        guard isValid else { return }
+        if isEditingExisting, let id = existingEntryId {
+            dataStore.updateEntry(id: id, mealType: targetMeal, serving: selectedServing, quantity: quantity, date: targetDate)
+        } else {
+            dataStore.logFood(food: food, mealType: targetMeal, serving: selectedServing, quantity: quantity, date: targetDate)
+        }
+        UINotificationFeedbackGenerator().notificationOccurred(.success)
         onLogged?()
         dismiss()
     }
 }
 
-// MARK: - Calorie Quick Button
-struct CalorieQuickButton: View {
-    let label: String
-    let delta: Double
-    let onApply: (Double) -> Void
-    
-    var body: some View {
-        Button(action: { onApply(delta) }) {
-            Text(label)
-                .font(.system(size: 13, weight: .bold, design: .rounded))
-                .foregroundColor(.primary)
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 7)
-                .background(Color(.systemGray6))
-                .cornerRadius(9)
-        }
-    }
-}
-
-// MARK: - Direct Calorie Edit Sheet
+// MARK: - Set-by-calories Sheet
 struct CalorieDirectEditSheet: View {
-    @State var inputCalories: Double
-    var onSaveCalories: (Double) -> Void
+    var onSave: (Double) -> Void
     @Environment(\.dismiss) private var dismiss
-    
+    @State private var caloriesText: String
+    @FocusState private var focused: Bool
+
     init(currentCalories: Double, onSaveCalories: @escaping (Double) -> Void) {
-        self._inputCalories = State(initialValue: currentCalories)
-        self.onSaveCalories = onSaveCalories
+        self._caloriesText = State(initialValue: String(Int(currentCalories.rounded())))
+        self.onSave = onSaveCalories
     }
-    
+
+    private var value: Double? {
+        guard let v = Double(userInput: caloriesText), v > 0 else { return nil }
+        return v
+    }
+
     var body: some View {
         NavigationStack {
-            VStack(spacing: 24) {
-                VStack(spacing: 6) {
-                    Text("Set Target Calories")
-                        .font(.system(size: 20, weight: .bold, design: .rounded))
-                    
-                    Text("The portion size, protein, carbs, and fat will automatically scale to match.")
-                        .font(.system(size: 13))
-                        .foregroundColor(.secondary)
-                        .multilineTextAlignment(.center)
-                        .padding(.horizontal)
+            Form {
+                Section {
+                    HStack {
+                        TextField("Calories", text: $caloriesText)
+                            .keyboardType(.numberPad)
+                            .font(.title2.weight(.semibold).monospacedDigit())
+                            .focused($focused)
+                        Text("kcal").foregroundStyle(.secondary)
+                    }
+                } footer: {
+                    Text("The amount is adjusted so this portion has the calories you enter.")
                 }
-                .padding(.top, 16)
-                
-                HStack(spacing: 8) {
-                    TextField("Calories", value: $inputCalories, format: .number)
-                        .keyboardType(.numberPad)
-                        .font(.system(size: 44, weight: .bold, design: .rounded))
-                        .multilineTextAlignment(.center)
-                        .padding()
-                        .background(Color(.secondarySystemGroupedBackground))
-                        .cornerRadius(18)
-                    
-                    Text("kcal")
-                        .font(.system(size: 20, weight: .bold))
-                        .foregroundColor(.secondary)
-                }
-                .padding(.horizontal, 24)
-                
-                HStack(spacing: 10) {
-                    Button("+10") { inputCalories += 10 }
-                    Button("+50") { inputCalories += 50 }
-                    Button("+100") { inputCalories += 100 }
-                    Button("+200") { inputCalories += 200 }
-                }
-                .font(.system(size: 14, weight: .bold))
-                .buttonStyle(.bordered)
-                
-                Spacer()
-                
-                Button(action: {
-                    onSaveCalories(inputCalories)
-                    dismiss()
-                }) {
-                    Text("Apply & Auto-Scale Macros")
-                        .font(.system(size: 17, weight: .bold))
-                        .foregroundColor(.white)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 14)
-                        .background(Color.accentColor)
-                        .cornerRadius(16)
-                }
-                .padding(.horizontal, 20)
-                .padding(.bottom, 16)
             }
-            .background(Color(.systemGroupedBackground))
+            .navigationTitle("Set by Calories")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { dismiss() }
                 }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Apply") {
+                        if let value { onSave(value) }
+                        dismiss()
+                    }
+                    .disabled(value == nil)
+                }
             }
+            .onAppear { focused = true }
         }
-        .presentationDetents([.medium])
+        .presentationDetents([.height(240)])
     }
 }
 
@@ -448,17 +341,14 @@ struct MacroCard: View {
     let name: String
     let grams: Double
     let color: Color
-    
+
     var body: some View {
         VStack(spacing: 4) {
             Text(name)
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundColor(.secondary)
-            
-            Text("\(String(format: "%.1f", grams)) g")
-                .font(.system(size: 16, weight: .bold, design: .rounded))
-                .foregroundColor(.primary)
-            
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+            Text("\(grams.roundedString) g")
+                .font(.headline.monospacedDigit())
             Capsule()
                 .fill(color)
                 .frame(height: 3)
@@ -466,8 +356,7 @@ struct MacroCard: View {
         .frame(maxWidth: .infinity)
         .padding(.vertical, 8)
         .padding(.horizontal, 10)
-        .background(Color(.systemGray6))
-        .cornerRadius(12)
+        .background(Color(.systemGray6), in: RoundedRectangle(cornerRadius: 12))
     }
 }
 
@@ -475,17 +364,18 @@ struct MacroCard: View {
 struct NutrientRow: View {
     let label: String
     let value: String
-    
+    var indent: Bool = false
+
     var body: some View {
         HStack {
             Text(label)
-                .font(.system(size: 14))
-                .foregroundColor(.primary)
+                .foregroundStyle(indent ? .secondary : .primary)
+                .padding(.leading, indent ? 16 : 0)
             Spacer()
             Text(value)
-                .font(.system(size: 14, weight: .medium))
-                .foregroundColor(.secondary)
+                .monospacedDigit()
+                .foregroundStyle(.secondary)
         }
-        .padding(.vertical, 2)
+        .accessibilityElement(children: .combine)
     }
 }
