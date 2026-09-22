@@ -4,18 +4,20 @@
 //
 
 import SwiftUI
-import WidgetKit
 
 @main
 struct track_yo_caloriesApp: App {
-    init() {
-        // Force iOS to register and update Lock Screen & Home Screen widgets
-        WidgetCenter.shared.reloadAllTimelines()
-    }
-    
+    @Environment(\.scenePhase) private var scenePhase
+
     var body: some Scene {
         WindowGroup {
             ContentView()
+        }
+        .onChange(of: scenePhase) { _, phase in
+            // Keeps the Lock Screen widget current (e.g. after midnight or a restore).
+            if phase == .active || phase == .background {
+                DataStore.shared.updateWidgetData()
+            }
         }
     }
 }
