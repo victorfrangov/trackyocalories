@@ -6,7 +6,7 @@
 import Foundation
 import SwiftUI
 
-struct ServingOption: Identifiable, Codable, Equatable, Hashable, Sendable {
+nonisolated struct ServingOption: Identifiable, Codable, Equatable, Hashable, Sendable {
     var id: UUID = UUID()
     var name: String // e.g. "100 grams", "1 medium (182g)", "1 scoop (30g)", "1 tbsp (14g)"
     var gramWeight: Double // weight in grams
@@ -17,7 +17,7 @@ struct ServingOption: Identifiable, Codable, Equatable, Hashable, Sendable {
     }
 }
 
-struct NutrientInfo: Codable, Equatable, Hashable, Sendable {
+nonisolated struct NutrientInfo: Codable, Equatable, Hashable, Sendable {
     var calories: Double // kcal per 100g
     var protein: Double  // grams per 100g
     var carbs: Double    // grams per 100g
@@ -52,7 +52,7 @@ struct NutrientInfo: Codable, Equatable, Hashable, Sendable {
     }
 }
 
-struct FoodItem: Identifiable, Codable, Equatable, Hashable, Sendable {
+nonisolated struct FoodItem: Identifiable, Codable, Equatable, Hashable, Sendable {
     var id: UUID = UUID()
     var barcode: String? = nil
     var name: String

@@ -7,7 +7,7 @@ import Foundation
 import SwiftUI
 import UIKit
 
-struct AIFoodItemEstimate: Identifiable, Codable, Sendable {
+nonisolated struct AIFoodItemEstimate: Identifiable, Codable, Sendable {
     var id: UUID = UUID()
     var name: String
     var calories: Double
@@ -107,7 +107,7 @@ struct AIFoodItemEstimate: Identifiable, Codable, Sendable {
     }
 }
 
-struct AIFoodEstimate: Identifiable, Codable, Sendable {
+nonisolated struct AIFoodEstimate: Identifiable, Codable, Sendable {
     var id: UUID = UUID()
     var mealName: String
     var items: [AIFoodItemEstimate]
@@ -241,7 +241,7 @@ struct AIFoodEstimate: Identifiable, Codable, Sendable {
     }
 }
 
-enum AIScannerError: LocalizedError {
+nonisolated enum AIScannerError: LocalizedError {
     case missingApiKey
     case imageCompressionFailed
     case invalidResponse
@@ -267,13 +267,18 @@ enum AIScannerError: LocalizedError {
 actor AIFoodScannerService {
     static let shared = AIFoodScannerService()
     
+    /// The model that answered last; tried first next time.
     private var preferredModel: String = "gemini-3.5-flash-lite"
-    
+
+    /// Models that rejected `thinkingConfig`, so it isn't sent to them again.
+    private var modelsWithoutThinkingConfig: Set<String> = []
+
     private let session: URLSession = {
         let config = URLSessionConfiguration.default
-        config.timeoutIntervalForRequest = 12.0
-        config.timeoutIntervalForResource = 20.0
-        config.httpShouldUsePipelining = true
+        // Gemini sends nothing until the whole answer is ready, so the idle timeout must cover
+        // the model's full thinking + generation time (12 s was regularly too short).
+        config.timeoutIntervalForRequest = 45.0
+        config.timeoutIntervalForResource = 60.0
         config.waitsForConnectivity = false
         return URLSession(configuration: config)
     }()
@@ -298,7 +303,7 @@ actor AIFoodScannerService {
         _ run: (String) async throws -> AIFoodEstimate
     ) async throws -> AIFoodEstimate {
         var candidates: [String] = []
-        for model in [preferredModel, primary, "gemini-3.5-flash-lite", "gemini-3.5-flash", "gemini-3.7-flash", "gemini-flash-latest"]
+        for model in [preferredModel, primary, "gemini-3.5-flash-lite", "gemini-3.5-flash", "gemini-3.7-flash", "gemini-flash-lite-latest", "gemini-flash-latest"]
         where !candidates.contains(model) {
             candidates.append(model)
         }
@@ -311,24 +316,68 @@ actor AIFoodScannerService {
                 preferredModel = model
                 return result
             } catch let error as AIScannerError {
-                guard case .modelUnavailable = error else { throw error }
-                lastError = error
-            } catch is URLError {
-                lastError = AIScannerError.apiError("Couldn’t reach Google AI. Check your internet connection and try again.")
+                switch error {
+                case .modelUnavailable, .invalidResponse:
+                    lastError = error // try the next model
+                default:
+                    throw error
+                }
+            } catch let error as URLError {
+                // A timeout or dropped connection won't be fixed by another model, and trying
+                // each one in turn is what made the spinner run for minutes. Fail once, clearly.
+                if error.code == .cancelled { throw CancellationError() }
+                if error.code == .timedOut {
+                    throw AIScannerError.apiError("Google AI took too long to answer. Please try again — shorter descriptions and clear photos are faster.")
+                }
+                throw AIScannerError.apiError("Couldn’t reach Google AI. Check your internet connection and try again.")
             } catch is DecodingError {
                 lastError = AIScannerError.invalidResponse
             }
         }
         throw lastError
     }
-    
-    private func executeGeminiTextRequest(model: String, description: String, apiKey: String) async throws -> AIFoodEstimate {
+
+    /// Sends one generateContent request. Asks for low "thinking" effort, which is much faster
+    /// and plenty for calorie estimates; if a model doesn't support that setting it is retried
+    /// once without it.
+    private func generate(model: String, parts: [[String: Any]], apiKey: String) async throws -> AIFoodEstimate {
         let cleanModel = model.hasPrefix("models/") ? String(model.dropFirst(7)) : model
-        
         guard let url = URL(string: "https://generativelanguage.googleapis.com/v1beta/models/\(cleanModel):generateContent") else {
             throw AIScannerError.apiError("Invalid API endpoint URL")
         }
-        
+
+        let sendThinkingConfig = !modelsWithoutThinkingConfig.contains(cleanModel)
+        var generationConfig: [String: Any] = [
+            "responseMimeType": "application/json",
+            "temperature": 0.2
+        ]
+        if sendThinkingConfig {
+            generationConfig["thinkingConfig"] = ["thinkingLevel": "low"]
+        }
+        let payload: [String: Any] = [
+            "contents": [["parts": parts]],
+            "generationConfig": generationConfig
+        ]
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue(apiKey, forHTTPHeaderField: "x-goog-api-key")
+        request.httpBody = try JSONSerialization.data(withJSONObject: payload)
+
+        let (data, response) = try await session.data(for: request)
+
+        if sendThinkingConfig,
+           let http = response as? HTTPURLResponse, http.statusCode == 400,
+           String(decoding: data, as: UTF8.self).localizedCaseInsensitiveContains("thinking") {
+            modelsWithoutThinkingConfig.insert(cleanModel)
+            return try await generate(model: cleanModel, parts: parts, apiKey: apiKey)
+        }
+
+        return try parseGeminiResponse(data: data, response: response, cleanModel: cleanModel)
+    }
+
+    private func executeGeminiTextRequest(model: String, description: String, apiKey: String) async throws -> AIFoodEstimate {
         let promptText = """
         You are an expert clinical dietitian and calorie tracker.
         The user describes what they ate: "\(description)".
@@ -357,28 +406,7 @@ actor AIFoodScannerService {
         }
         """
         
-        let requestPayload: [String: Any] = [
-            "contents": [
-                [
-                    "parts": [
-                        ["text": promptText]
-                    ]
-                ]
-            ],
-            "generationConfig": [
-                "responseMimeType": "application/json",
-                "temperature": 0.2
-            ]
-        ]
-        
-        var request = URLRequest(url: url)
-        request.httpMethod = "POST"
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.setValue(apiKey, forHTTPHeaderField: "x-goog-api-key")
-        request.httpBody = try JSONSerialization.data(withJSONObject: requestPayload)
-        
-        let (data, response) = try await session.data(for: request)
-        return try parseGeminiResponse(data: data, response: response, cleanModel: cleanModel)
+        return try await generate(model: model, parts: [["text": promptText]], apiKey: apiKey)
     }
     
     // MARK: - Photo Analysis (Separated Items)
@@ -394,18 +422,13 @@ actor AIFoodScannerService {
         }
         let base64String = jpegData.base64EncodedString()
         
-        return try await withModelFallback(primary: "gemini-3.5-flash") { model in
+        // Lite first: it handles food photos well and answers far faster than the full model.
+        return try await withModelFallback(primary: "gemini-3.5-flash-lite") { model in
             try await self.executeGeminiVisionRequest(model: model, base64Image: base64String, apiKey: cleanKey)
         }
     }
-    
+
     private func executeGeminiVisionRequest(model: String, base64Image: String, apiKey: String) async throws -> AIFoodEstimate {
-        let cleanModel = model.hasPrefix("models/") ? String(model.dropFirst(7)) : model
-        
-        guard let url = URL(string: "https://generativelanguage.googleapis.com/v1beta/models/\(cleanModel):generateContent") else {
-            throw AIScannerError.apiError("Invalid API endpoint URL")
-        }
-        
         let promptText = """
         You are an expert clinical dietitian and nutritionist.
         Analyze all food items visible in this image.
@@ -434,34 +457,11 @@ actor AIFoodScannerService {
         }
         """
         
-        let requestPayload: [String: Any] = [
-            "contents": [
-                [
-                    "parts": [
-                        ["text": promptText],
-                        [
-                            "inlineData": [
-                                "mimeType": "image/jpeg",
-                                "data": base64Image
-                            ]
-                        ]
-                    ]
-                ]
-            ],
-            "generationConfig": [
-                "responseMimeType": "application/json",
-                "temperature": 0.2
-            ]
+        let parts: [[String: Any]] = [
+            ["text": promptText],
+            ["inlineData": ["mimeType": "image/jpeg", "data": base64Image]]
         ]
-        
-        var request = URLRequest(url: url)
-        request.httpMethod = "POST"
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.setValue(apiKey, forHTTPHeaderField: "x-goog-api-key")
-        request.httpBody = try JSONSerialization.data(withJSONObject: requestPayload)
-        
-        let (data, response) = try await session.data(for: request)
-        return try parseGeminiResponse(data: data, response: response, cleanModel: cleanModel)
+        return try await generate(model: model, parts: parts, apiKey: apiKey)
     }
     
     private func parseGeminiResponse(data: Data, response: URLResponse, cleanModel: String) throws -> AIFoodEstimate {
